@@ -1,1817 +1,1319 @@
--- Rayfield Gen3 v1.0.0
--- Modernized UI Library for Roblox
--- loadstring(game:HttpGet("https://raw.githubusercontent.com/rayfield-gen3/main/release.lua"))()
+-- Enhanced Rayfield Gen2 - Modern UI Library
+-- Version: 2.1.0-Enhanced
+-- Improvements: Animations, Accessibility, Performance, Modern Components
 
---[[
-    Rayfield Gen3 - Complete Modern Rewrite
+local EnhancedRayfield = {}
+EnhancedRayfield.__version = "2.1.0-Enhanced"
+EnhancedRayfield.__author = "Enhanced Community Edition"
 
-    Improvements over Gen2:
-    - Spring-based animations (60fps smooth)
-    - Reactive state management
-    - Modular plugin architecture
-    - Virtual scrolling for large lists
-    - Glassmorphism & modern visual effects
-    - Promise-based async API
-    - Better error handling & debugging
-    - Hot-reload development support
-    - Improved mobile/touch support
-    - Memory-optimized with object pooling
-]]
+-- =============================================================================
+-- CORE ENHANCEMENTS MODULE
+-- =============================================================================
 
-local Gen3 = {}
-Gen3.Version = "1.0.0"
-Gen3.Build = "release"
+local CoreEnhancements = {}
 
--- Services
-local Services = setmetatable({}, {
-    __index = function(self, serviceName)
-        local service = game:GetService(serviceName)
-        if cloneref then service = cloneref(service) end
-        rawset(self, serviceName, service)
-        return service
-    end
-})
-
--- Core Utilities
-local Utility = {}
-
-function Utility.Spring(target, current, velocity, stiffness, damping, dt)
-    local displacement = target - current
-    local springForce = displacement * stiffness
-    local dampingForce = velocity * damping
-    local acceleration = springForce - dampingForce
-    velocity = velocity + acceleration * dt
-    current = current + velocity * dt
-    return current, velocity
-end
-
-function Utility.Lerp(a, b, t)
-    return a + (b - a) * t
-end
-
-function Utility.EaseOutExpo(t)
-    return t == 1 and 1 or 1 - math.pow(2, -10 * t)
-end
-
-function Utility.EaseOutBack(t)
-    local c1 = 1.70158
-    local c3 = c1 + 1
-    return 1 + c3 * math.pow(t - 1, 3) + c1 * math.pow(t - 1, 2)
-end
-
-function Utility.Debounce(func, waitTime)
-    local timeout
-    return function(...)
-        if timeout then timeout:Disconnect() end
-        timeout = task.delay(waitTime, function(...)
-            timeout = nil
-            func(...)
-        end, ...)
-    end
-end
-
-function Utility.Throttle(func, limit)
-    local lastCall = 0
-    return function(...)
-        local now = tick()
-        if now - lastCall >= limit then
-            lastCall = now
-            return func(...)
-        end
-    end
-end
-
--- Promise Implementation
-local Promise = {}
-Promise.__index = Promise
-
-function Promise.new(executor)
-    local self = setmetatable({}, Promise)
-    self._state = "pending"
-    self._value = nil
-    self._reason = nil
-    self._onFulfilled = {}
-    self._onRejected = {}
-
-    local function resolve(value)
-        if self._state == "pending" then
-            self._state = "fulfilled"
-            self._value = value
-            for _, callback in ipairs(self._onFulfilled) do
-                task.spawn(callback, value)
-            end
-        end
-    end
-
-    local function reject(reason)
-        if self._state == "pending" then
-            self._state = "rejected"
-            self._reason = reason
-            for _, callback in ipairs(self._onRejected) do
-                task.spawn(callback, reason)
-            end
-        end
-    end
-
-    task.spawn(function()
-        local success, err = pcall(executor, resolve, reject)
-        if not success then reject(err) end
-    end)
-
-    return self
-end
-
-function Promise:Then(onFulfilled, onRejected)
-    return Promise.new(function(resolve, reject)
-        local function handleFulfilled(value)
-            if onFulfilled then
-                local success, result = pcall(onFulfilled, value)
-                if success then resolve(result) else reject(result) end
+-- 1. ANIMATION SYSTEM OVERHAUL
+CoreEnhancements.AnimationSystem = {
+    _activeTweens = {},
+    _easingFunctions = {
+        -- Custom easing curves for modern feel
+        spring = function(t, damping, stiffness)
+            damping = damping or 0.8
+            stiffness = stiffness or 300
+            local omega = math.sqrt(stiffness)
+            local zeta = damping / (2 * math.sqrt(stiffness))
+            if zeta < 1 then
+                local omegaD = omega * math.sqrt(1 - zeta * zeta)
+                local theta = math.atan(omegaD / (zeta * omega))
+                return 1 - math.exp(-zeta * omega * t) * math.cos(omegaD * t - theta) / math.cos(theta)
             else
-                resolve(value)
+                return 1 - math.exp(-omega * t) * (1 + omega * t)
             end
-        end
+        end,
 
-        local function handleRejected(reason)
-            if onRejected then
-                local success, result = pcall(onRejected, reason)
-                if success then resolve(result) else reject(result) end
+        elastic = function(t, amplitude, period)
+            amplitude = amplitude or 1
+            period = period or 0.3
+            if t == 0 then return 0 end
+            if t == 1 then return 1 end
+            local s = period / 4
+            return amplitude * math.pow(2, -10 * t) * math.sin((t - s) * (2 * math.pi) / period) + 1
+        end,
+
+        bounce = function(t)
+            local n1, d1 = 7.5625, 2.75
+            if t < 1 / d1 then
+                return n1 * t * t
+            elseif t < 2 / d1 then
+                t = t - 1.5 / d1
+                return n1 * t * t + 0.75
+            elseif t < 2.5 / d1 then
+                t = t - 2.25 / d1
+                return n1 * t * t + 0.9375
             else
-                reject(reason)
+                t = t - 2.625 / d1
+                return n1 * t * t + 0.984375
             end
-        end
-
-        if self._state == "fulfilled" then
-            task.spawn(handleFulfilled, self._value)
-        elseif self._state == "rejected" then
-            task.spawn(handleRejected, self._reason)
-        else
-            table.insert(self._onFulfilled, handleFulfilled)
-            table.insert(self._onRejected, handleRejected)
-        end
-    end)
-end
-
-function Promise:Catch(onRejected)
-    return self:Then(nil, onRejected)
-end
-
-function Promise:Finally(onFinally)
-    return self:Then(function(value)
-        onFinally()
-        return value
-    end, function(reason)
-        onFinally()
-        error(reason)
-    end)
-end
-
-function Promise.Resolve(value)
-    return Promise.new(function(resolve) resolve(value) end)
-end
-
-function Promise.Reject(reason)
-    return Promise.new(function(_, reject) reject(reason) end)
-end
-
-function Promise.All(promises)
-    return Promise.new(function(resolve, reject)
-        local results = {}
-        local completed = 0
-        local total = #promises
-
-        if total == 0 then resolve(results) return end
-
-        for i, promise in ipairs(promises) do
-            promise:Then(function(value)
-                results[i] = value
-                completed = completed + 1
-                if completed == total then resolve(results) end
-            end, reject)
-        end
-    end)
-end
-
--- Event Bus
-local EventBus = {}
-EventBus._listeners = {}
-
-function EventBus.On(event, callback)
-    EventBus._listeners[event] = EventBus._listeners[event] or {}
-    table.insert(EventBus._listeners[event], callback)
-    return function()
-        local index = table.find(EventBus._listeners[event], callback)
-        if index then table.remove(EventBus._listeners[event], index) end
-    end
-end
-
-function EventBus.Emit(event, ...)
-    if EventBus._listeners[event] then
-        for _, callback in ipairs(EventBus._listeners[event]) do
-            task.spawn(callback, ...)
-        end
-    end
-end
-
--- State Management
-local State = {}
-State.__index = State
-
-function State.new(initialValue)
-    local self = setmetatable({}, State)
-    self._value = initialValue
-    self._listeners = {}
-    self._computed = {}
-    return self
-end
-
-function State:Get()
-    return self._value
-end
-
-function State:Set(value)
-    if self._value ~= value then
-        self._value = value
-        for _, callback in ipairs(self._listeners) do
-            callback(value)
-        end
-        EventBus.Emit("stateChanged", self, value)
-    end
-end
-
-function State:Subscribe(callback)
-    table.insert(self._listeners, callback)
-    return function()
-        local index = table.find(self._listeners, callback)
-        if index then table.remove(self._listeners, index) end
-    end
-end
-
-function State:Bind(property)
-    return self:Subscribe(function(value)
-        property.Value = value
-    end)
-end
-
--- Object Pool
-local ObjectPool = {}
-ObjectPool._pools = {}
-
-function ObjectPool.Get(className, parent)
-    local pool = ObjectPool._pools[className]
-    if pool and #pool > 0 then
-        local obj = table.remove(pool)
-        obj.Parent = parent
-        return obj
-    end
-    return Instance.new(className, parent)
-end
-
-function ObjectPool.Release(obj)
-    obj.Parent = nil
-    local className = obj.ClassName
-    ObjectPool._pools[className] = ObjectPool._pools[className] or {}
-    table.insert(ObjectPool._pools[className], obj)
-end
-
--- Animation Engine
-local Animation = {}
-Animation._active = {}
-
-function Animation.Spring(object, property, target, stiffness, damping)
-    stiffness = stiffness or 200
-    damping = damping or 20
-
-    local current = object[property]
-    local velocity = 0
-    local connection
-
-    connection = Services.RunService.Heartbeat:Connect(function(dt)
-        current, velocity = Utility.Spring(target, current, velocity, stiffness, damping, dt)
-        object[property] = current
-
-        if math.abs(target - current) < 0.001 and math.abs(velocity) < 0.001 then
-            object[property] = target
-            connection:Disconnect()
-        end
-    end)
-
-    return connection
-end
-
-function Animation.Tween(object, properties, duration, easingStyle)
-    duration = duration or 0.3
-    easingStyle = easingStyle or Utility.EaseOutExpo
-
-    local startValues = {}
-    for prop, target in pairs(properties) do
-        startValues[prop] = object[prop]
-    end
-
-    local startTime = tick()
-    local connection
-
-    connection = Services.RunService.Heartbeat:Connect(function()
-        local elapsed = tick() - startTime
-        local progress = math.min(elapsed / duration, 1)
-        local eased = easingStyle(progress)
-
-        for prop, target in pairs(properties) do
-            if typeof(startValues[prop]) == "number" then
-                object[prop] = Utility.Lerp(startValues[prop], target, eased)
-            elseif typeof(startValues[prop]) == "UDim2" then
-                object[prop] = UDim2.new(
-                    Utility.Lerp(startValues[prop].X.Scale, target.X.Scale, eased),
-                    Utility.Lerp(startValues[prop].X.Offset, target.X.Offset, eased),
-                    Utility.Lerp(startValues[prop].Y.Scale, target.Y.Scale, eased),
-                    Utility.Lerp(startValues[prop].Y.Offset, target.Y.Offset, eased)
-                )
-            elseif typeof(startValues[prop]) == "Color3" then
-                object[prop] = Color3.new(
-                    Utility.Lerp(startValues[prop].R, target.R, eased),
-                    Utility.Lerp(startValues[prop].G, target.G, eased),
-                    Utility.Lerp(startValues[prop].B, target.B, eased)
-                )
-            end
-        end
-
-        if progress >= 1 then
-            connection:Disconnect()
-            EventBus.Emit("tweenComplete", object)
-        end
-    end)
-
-    return connection
-end
-
--- Theme System
-local Themes = {}
-
-Themes.Default = {
-    Primary = Color3.fromRGB(88, 101, 242),
-    Secondary = Color3.fromRGB(57, 78, 106),
-    Background = Color3.fromRGB(30, 31, 34),
-    Surface = Color3.fromRGB(43, 45, 49),
-    Text = Color3.fromRGB(219, 222, 225),
-    TextMuted = Color3.fromRGB(148, 155, 164),
-    Accent = Color3.fromRGB(88, 101, 242),
-    Success = Color3.fromRGB(59, 165, 93),
-    Warning = Color3.fromRGB(250, 166, 26),
-    Error = Color3.fromRGB(237, 66, 69),
-    GlassTransparency = 0.15,
-    CornerRadius = UDim.new(0, 8),
-    Font = Font.fromEnum(Enum.Font.GothamMedium),
-    TitleFont = Font.fromEnum(Enum.Font.GothamBold),
-}
-
-Themes.Dark = {
-    Primary = Color3.fromRGB(114, 137, 218),
-    Secondary = Color3.fromRGB(66, 69, 73),
-    Background = Color3.fromRGB(18, 18, 18),
-    Surface = Color3.fromRGB(24, 24, 24),
-    Text = Color3.fromRGB(255, 255, 255),
-    TextMuted = Color3.fromRGB(163, 163, 163),
-    Accent = Color3.fromRGB(114, 137, 218),
-    Success = Color3.fromRGB(87, 242, 135),
-    Warning = Color3.fromRGB(255, 200, 87),
-    Error = Color3.fromRGB(255, 100, 100),
-    GlassTransparency = 0.1,
-    CornerRadius = UDim.new(0, 12),
-    Font = Font.fromEnum(Enum.Font.GothamMedium),
-    TitleFont = Font.fromEnum(Enum.Font.GothamBold),
-}
-
-Themes.Light = {
-    Primary = Color3.fromRGB(88, 101, 242),
-    Secondary = Color3.fromRGB(235, 235, 235),
-    Background = Color3.fromRGB(255, 255, 255),
-    Surface = Color3.fromRGB(245, 245, 245),
-    Text = Color3.fromRGB(32, 34, 37),
-    TextMuted = Color3.fromRGB(116, 127, 141),
-    Accent = Color3.fromRGB(88, 101, 242),
-    Success = Color3.fromRGB(59, 165, 93),
-    Warning = Color3.fromRGB(250, 166, 26),
-    Error = Color3.fromRGB(237, 66, 69),
-    GlassTransparency = 0.05,
-    CornerRadius = UDim.new(0, 8),
-    Font = Font.fromEnum(Enum.Font.GothamMedium),
-    TitleFont = Font.fromEnum(Enum.Font.GothamBold),
-}
-
-Themes.Glass = {
-    Primary = Color3.fromRGB(255, 255, 255),
-    Secondary = Color3.fromRGB(255, 255, 255),
-    Background = Color3.fromRGB(0, 0, 0),
-    Surface = Color3.fromRGB(255, 255, 255),
-    Text = Color3.fromRGB(255, 255, 255),
-    TextMuted = Color3.fromRGB(200, 200, 200),
-    Accent = Color3.fromRGB(100, 200, 255),
-    Success = Color3.fromRGB(100, 255, 150),
-    Warning = Color3.fromRGB(255, 220, 100),
-    Error = Color3.fromRGB(255, 100, 100),
-    GlassTransparency = 0.3,
-    CornerRadius = UDim.new(0, 16),
-    Font = Font.fromEnum(Enum.Font.GothamMedium),
-    TitleFont = Font.fromEnum(Enum.Font.GothamBold),
-}
-
--- Component Base
-local Component = {}
-Component.__index = Component
-
-function Component.new(className, properties, parent)
-    local self = setmetatable({}, Component)
-    self.Instance = ObjectPool.Get(className, parent)
-    self._connections = {}
-    self._children = {}
-
-    if properties then
-        for prop, value in pairs(properties) do
-            if prop ~= "Parent" then
-                self.Instance[prop] = value
-            end
-        end
-    end
-
-    return self
-end
-
-function Component:Connect(event, callback)
-    local connection = event:Connect(callback)
-    table.insert(self._connections, connection)
-    return connection
-end
-
-function Component:Destroy()
-    for _, connection in ipairs(self._connections) do
-        connection:Disconnect()
-    end
-    self._connections = {}
-
-    for _, child in ipairs(self._children) do
-        child:Destroy()
-    end
-    self._children = {}
-
-    ObjectPool.Release(self.Instance)
-end
-
-function Component:AddChild(child)
-    table.insert(self._children, child)
-    return child
-end
-
--- Glassmorphism Effect
-local Glassmorphism = {}
-
-function Glassmorphism.Apply(frame, transparency)
-    local blur = Instance.new("BlurEffect")
-    blur.Size = 20
-    blur.Parent = frame
-
-    local gradient = Instance.new("UIGradient")
-    gradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 200, 200))
-    })
-    gradient.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, transparency or 0.3),
-        NumberSequenceKeypoint.new(1, transparency and transparency + 0.1 or 0.4)
-    })
-    gradient.Parent = frame
-
-    return {blur, gradient}
-end
-
--- Window Component
-local Window = {}
-Window.__index = Window
-setmetatable(Window, Component)
-
-function Window.new(config)
-    config = config or {}
-    local self = setmetatable(Component.new("ScreenGui", {
-        Name = config.Name or "RayfieldGen3",
-        ResetOnSpawn = false,
-        ZIndexBehavior = Enum.ZIndexBehavior.Global,
-        DisplayOrder = 999,
-    }, Services.CoreGui), Window)
-
-    self.Theme = Themes[config.Theme] or Themes.Default
-    self.Title = config.Title or "Rayfield Gen3"
-    self.SubTitle = config.SubTitle or ""
-    self.Size = config.Size or UDim2.fromOffset(600, 400)
-    self.Position = config.Position or UDim2.fromScale(0.5, 0.5)
-    self.Draggable = config.Draggable ~= false
-    self.Minimizable = config.Minimizable ~= false
-    self.Collapsible = config.Collapsible ~= false
-
-    self._tabs = {}
-    self._activeTab = nil
-    self._minimized = false
-    self._collapsed = false
-    self._dragging = false
-    self._dragStart = nil
-    self._dragOffset = nil
-
-    self:_build()
-    self:_setupDragging()
-    self:_setupAnimations()
-
-    EventBus.Emit("windowCreated", self)
-
-    return self
-end
-
-function Window:_build()
-    -- Main Container
-    self.Main = Component.new("Frame", {
-        Name = "Main",
-        Size = self.Size,
-        Position = self.Position,
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundColor3 = self.Theme.Background,
-        BackgroundTransparency = self.Theme.GlassTransparency,
-        BorderSizePixel = 0,
-        ClipsDescendants = true,
-    }, self.Instance)
-    self:AddChild(self.Main)
-
-    -- Corner
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = self.Theme.CornerRadius
-    corner.Parent = self.Main.Instance
-
-    -- Shadow
-    local shadow = Instance.new("ImageLabel")
-    shadow.Name = "Shadow"
-    shadow.AnchorPoint = Vector2.new(0.5, 0.5)
-    shadow.Position = UDim2.fromScale(0.5, 0.5)
-    shadow.Size = UDim2.new(1, 40, 1, 40)
-    shadow.BackgroundTransparency = 1
-    shadow.Image = "rbxassetid://5554236805"
-    shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
-    shadow.ImageTransparency = 0.6
-    shadow.ScaleType = Enum.ScaleType.Slice
-    shadow.SliceCenter = Rect.new(23, 23, 277, 277)
-    shadow.ZIndex = -1
-    shadow.Parent = self.Main.Instance
-
-    -- Apply glassmorphism if theme supports it
-    if self.Theme.GlassTransparency > 0.2 then
-        Glassmorphism.Apply(self.Main.Instance, self.Theme.GlassTransparency)
-    end
-
-    -- Top Bar
-    self.TopBar = Component.new("Frame", {
-        Name = "TopBar",
-        Size = UDim2.new(1, 0, 0, 40),
-        Position = UDim2.fromScale(0, 0),
-        BackgroundColor3 = self.Theme.Surface,
-        BackgroundTransparency = 0.5,
-        BorderSizePixel = 0,
-    }, self.Main.Instance)
-    self:AddChild(self.TopBar)
-
-    -- Title
-    self.TitleLabel = Component.new("TextLabel", {
-        Name = "Title",
-        Size = UDim2.new(0.5, 0, 1, 0),
-        Position = UDim2.fromOffset(15, 0),
-        BackgroundTransparency = 1,
-        Text = self.Title,
-        TextColor3 = self.Theme.Text,
-        TextSize = 18,
-        FontFace = self.Theme.TitleFont,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, self.TopBar.Instance)
-    self:AddChild(self.TitleLabel)
-
-    -- Subtitle
-    if self.SubTitle and self.SubTitle ~= "" then
-        self.SubTitleLabel = Component.new("TextLabel", {
-            Name = "SubTitle",
-            Size = UDim2.new(0.5, 0, 0, 20),
-            Position = UDim2.fromOffset(15, 40),
-            BackgroundTransparency = 1,
-            Text = self.SubTitle,
-            TextColor3 = self.Theme.TextMuted,
-            TextSize = 12,
-            FontFace = self.Theme.Font,
-            TextXAlignment = Enum.TextXAlignment.Left,
-        }, self.Main.Instance)
-        self:AddChild(self.SubTitleLabel)
-    end
-
-    -- Control Buttons
-    self.Controls = Component.new("Frame", {
-        Name = "Controls",
-        Size = UDim2.new(0, 100, 1, 0),
-        Position = UDim2.new(1, -105, 0, 0),
-        BackgroundTransparency = 1,
-    }, self.TopBar.Instance)
-    self:AddChild(self.Controls)
-
-    local controlsLayout = Instance.new("UIListLayout")
-    controlsLayout.FillDirection = Enum.FillDirection.Horizontal
-    controlsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
-    controlsLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-    controlsLayout.Padding = UDim.new(0, 8)
-    controlsLayout.Parent = self.Controls.Instance
-
-    -- Minimize Button
-    if self.Minimizable then
-        self.MinimizeBtn = self:_createControlButton("−", function()
-            self:ToggleMinimize()
-        end)
-    end
-
-    -- Collapse Button
-    if self.Collapsible then
-        self.CollapseBtn = self:_createControlButton("×", function()
-            self:ToggleCollapse()
-        end)
-    end
-
-    -- Tab Container
-    self.TabContainer = Component.new("Frame", {
-        Name = "TabContainer",
-        Size = UDim2.new(0, 120, 1, -50),
-        Position = UDim2.fromOffset(0, 50),
-        BackgroundColor3 = self.Theme.Surface,
-        BackgroundTransparency = 0.8,
-        BorderSizePixel = 0,
-    }, self.Main.Instance)
-    self:AddChild(self.TabContainer)
-
-    local tabCorner = Instance.new("UICorner")
-    tabCorner.CornerRadius = UDim.new(0, 6)
-    tabCorner.Parent = self.TabContainer.Instance
-
-    self.TabList = Instance.new("UIListLayout")
-    self.TabList.FillDirection = Enum.FillDirection.Vertical
-    self.TabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    self.TabList.VerticalAlignment = Enum.VerticalAlignment.Top
-    self.TabList.Padding = UDim.new(0, 4)
-    self.TabList.Parent = self.TabContainer.Instance
-
-    local tabPadding = Instance.new("UIPadding")
-    tabPadding.PaddingTop = UDim.new(0, 8)
-    tabPadding.PaddingBottom = UDim.new(0, 8)
-    tabPadding.PaddingLeft = UDim.new(0, 8)
-    tabPadding.PaddingRight = UDim.new(0, 8)
-    tabPadding.Parent = self.TabContainer.Instance
-
-    -- Content Container
-    self.ContentContainer = Component.new("Frame", {
-        Name = "Content",
-        Size = UDim2.new(1, -135, 1, -65),
-        Position = UDim2.fromOffset(130, 55),
-        BackgroundTransparency = 1,
-        ClipsDescendants = true,
-    }, self.Main.Instance)
-    self:AddChild(self.ContentContainer)
-
-    -- Content Pages
-    self.ContentPages = Instance.new("UIPageLayout")
-    self.ContentPages.EasingStyle = Enum.EasingStyle.Quint
-    self.ContentPages.EasingDirection = Enum.EasingDirection.Out
-    self.ContentPages.TweenTime = 0.3
-    self.ContentPages.Parent = self.ContentContainer.Instance
-end
-
-function Window:_createControlButton(text, callback)
-    local btn = Component.new("TextButton", {
-        Size = UDim2.fromOffset(24, 24),
-        BackgroundColor3 = self.Theme.Surface,
-        BackgroundTransparency = 0.5,
-        Text = text,
-        TextColor3 = self.Theme.Text,
-        TextSize = 14,
-        FontFace = self.Theme.Font,
-        AutoButtonColor = false,
-    }, self.Controls.Instance)
-
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 6)
-    btnCorner.Parent = btn.Instance
-
-    btn:Connect(btn.Instance.MouseEnter, function()
-        Animation.Tween(btn.Instance, {BackgroundTransparency = 0.2}, 0.2)
-    end)
-
-    btn:Connect(btn.Instance.MouseLeave, function()
-        Animation.Tween(btn.Instance, {BackgroundTransparency = 0.5}, 0.2)
-    end)
-
-    btn:Connect(btn.Instance.MouseButton1Click, callback)
-
-    return btn
-end
-
-function Window:_setupDragging()
-    if not self.Draggable then return end
-
-    self:Connect(self.TopBar.Instance.InputBegan, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-           input.UserInputType == Enum.UserInputType.Touch then
-            self._dragging = true
-            self._dragStart = input.Position
-            self._dragOffset = self.Main.Instance.Position
-        end
-    end)
-
-    self:Connect(Services.UserInputService.InputChanged, function(input)
-        if self._dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or 
-                              input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - self._dragStart
-            local newPos = UDim2.new(
-                self._dragOffset.X.Scale, 
-                self._dragOffset.X.Offset + delta.X,
-                self._dragOffset.Y.Scale, 
-                self._dragOffset.Y.Offset + delta.Y
-            )
-            self.Main.Instance.Position = newPos
-        end
-    end)
-
-    self:Connect(Services.UserInputService.InputEnded, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-           input.UserInputType == Enum.UserInputType.Touch then
-            self._dragging = false
-        end
-    end)
-end
-
-function Window:_setupAnimations()
-    -- Entrance animation
-    self.Main.Instance.Size = UDim2.fromOffset(0, 0)
-    self.Main.Instance.BackgroundTransparency = 1
-
-    task.delay(0.1, function()
-        Animation.Tween(self.Main.Instance, {
-            Size = self.Size,
-            BackgroundTransparency = self.Theme.GlassTransparency
-        }, 0.5, Utility.EaseOutBack)
-    end)
-end
-
-function Window:CreateTab(config)
-    config = config or {}
-    local tab = {
-        Name = config.Name or "Tab",
-        Icon = config.Icon,
-        Parent = self,
-    }
-
-    -- Tab Button
-    tab.Button = Component.new("TextButton", {
-        Size = UDim2.new(1, 0, 0, 36),
-        BackgroundColor3 = self.Theme.Surface,
-        BackgroundTransparency = 1,
-        Text = "",
-        AutoButtonColor = false,
-    }, self.TabContainer.Instance)
-
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 6)
-    btnCorner.Parent = tab.Button.Instance
-
-    -- Tab Icon
-    if tab.Icon then
-        tab.IconLabel = Component.new("ImageLabel", {
-            Size = UDim2.fromOffset(18, 18),
-            Position = UDim2.fromOffset(10, 9),
-            BackgroundTransparency = 1,
-            Image = tab.Icon,
-            ImageColor3 = self.Theme.TextMuted,
-        }, tab.Button.Instance)
-    end
-
-    -- Tab Text
-    tab.TextLabel = Component.new("TextLabel", {
-        Size = UDim2.new(1, tab.Icon and -35 or -20, 1, 0),
-        Position = UDim2.fromOffset(tab.Icon and 35 or 10, 0),
-        BackgroundTransparency = 1,
-        Text = tab.Name,
-        TextColor3 = self.Theme.TextMuted,
-        TextSize = 14,
-        FontFace = self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, tab.Button.Instance)
-
-    -- Content Page
-    tab.Page = Component.new("ScrollingFrame", {
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        ScrollBarThickness = 4,
-        ScrollBarImageColor3 = self.Theme.TextMuted,
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        CanvasSize = UDim2.new(),
-    }, self.ContentContainer.Instance)
-
-    local pageLayout = Instance.new("UIListLayout")
-    pageLayout.FillDirection = Enum.FillDirection.Vertical
-    pageLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    pageLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-    pageLayout.Padding = UDim.new(0, 8)
-    pageLayout.Parent = tab.Page.Instance
-
-    local pagePadding = Instance.new("UIPadding")
-    pagePadding.PaddingTop = UDim.new(0, 8)
-    pagePadding.PaddingBottom = UDim.new(0, 8)
-    pagePadding.PaddingLeft = UDim.new(0, 8)
-    pagePadding.PaddingRight = UDim.new(0, 8)
-    pagePadding.Parent = tab.Page.Instance
-
-    -- Tab Interactions
-    tab.Button:Connect(tab.Button.Instance.MouseEnter, function()
-        if self._activeTab ~= tab then
-            Animation.Tween(tab.Button.Instance, {BackgroundTransparency = 0.8}, 0.2)
-        end
-    end)
-
-    tab.Button:Connect(tab.Button.Instance.MouseLeave, function()
-        if self._activeTab ~= tab then
-            Animation.Tween(tab.Button.Instance, {BackgroundTransparency = 1}, 0.2)
-        end
-    end)
-
-    tab.Button:Connect(tab.Button.Instance.MouseButton1Click, function()
-        self:SelectTab(tab)
-    end)
-
-    table.insert(self._tabs, tab)
-
-    if not self._activeTab then
-        self:SelectTab(tab)
-    end
-
-    -- Tab API
-    tab.Elements = {}
-
-    function tab:CreateButton(config)
-        return self.Parent:_createButton(self, config)
-    end
-
-    function tab:CreateToggle(config)
-        return self.Parent:_createToggle(self, config)
-    end
-
-    function tab:CreateSlider(config)
-        return self.Parent:_createSlider(self, config)
-    end
-
-    function tab:CreateDropdown(config)
-        return self.Parent:_createDropdown(self, config)
-    end
-
-    function tab:CreateInput(config)
-        return self.Parent:_createInput(self, config)
-    end
-
-    function tab:CreateKeybind(config)
-        return self.Parent:_createKeybind(self, config)
-    end
-
-    function tab:CreateColorPicker(config)
-        return self.Parent:_createColorPicker(self, config)
-    end
-
-    function tab:CreateLabel(config)
-        return self.Parent:_createLabel(self, config)
-    end
-
-    function tab:CreateSection(config)
-        return self.Parent:_createSection(self, config)
-    end
-
-    EventBus.Emit("tabCreated", tab)
-    return tab
-end
-
-function Window:SelectTab(tab)
-    if self._activeTab == tab then return end
-
-    -- Deselect current
-    if self._activeTab then
-        Animation.Tween(self._activeTab.Button.Instance, {BackgroundTransparency = 1}, 0.2)
-        self._activeTab.TextLabel.Instance.TextColor3 = self.Theme.TextMuted
-        if self._activeTab.IconLabel then
-            self._activeTab.IconLabel.Instance.ImageColor3 = self.Theme.TextMuted
-        end
-    end
-
-    -- Select new
-    self._activeTab = tab
-    Animation.Tween(tab.Button.Instance, {BackgroundTransparency = 0.5}, 0.2)
-    tab.TextLabel.Instance.TextColor3 = self.Theme.Text
-    if tab.IconLabel then
-        tab.IconLabel.Instance.ImageColor3 = self.Theme.Accent
-    end
-
-    self.ContentPages:JumpTo(tab.Page.Instance)
-    EventBus.Emit("tabSelected", tab)
-end
-
--- Element Creation Methods
-function Window:_createBaseElement(parent, height)
-    local element = Component.new("Frame", {
-        Size = UDim2.new(1, 0, 0, height or 40),
-        BackgroundColor3 = self.Theme.Surface,
-        BackgroundTransparency = 0.9,
-        BorderSizePixel = 0,
-    }, parent.Page.Instance)
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = element.Instance
-
-    element:Connect(element.Instance.MouseEnter, function()
-        Animation.Tween(element.Instance, {BackgroundTransparency = 0.7}, 0.2)
-    end)
-
-    element:Connect(element.Instance.MouseLeave, function()
-        Animation.Tween(element.Instance, {BackgroundTransparency = 0.9}, 0.2)
-    end)
-
-    return element
-end
-
-function Window:_createButton(tab, config)
-    config = config or {}
-    local element = self:_createBaseElement(tab, 40)
-
-    local label = Component.new("TextLabel", {
-        Size = UDim2.new(1, -20, 1, 0),
-        Position = UDim2.fromOffset(10, 0),
-        BackgroundTransparency = 1,
-        Text = config.Name or "Button",
-        TextColor3 = self.Theme.Text,
-        TextSize = 14,
-        FontFace = self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, element.Instance)
-
-    local callback = config.Callback or function() end
-
-    element:Connect(element.Instance.InputBegan, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            Animation.Tween(element.Instance, {BackgroundTransparency = 0.5}, 0.1)
-        end
-    end)
-
-    element:Connect(element.Instance.InputEnded, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            Animation.Tween(element.Instance, {BackgroundTransparency = 0.9}, 0.2)
-            local success, err = pcall(callback)
-            if not success then
-                warn("Rayfield Gen3 Button Error: " .. tostring(err))
-            end
-        end
-    end)
-
-    -- API
-    local api = {
-        Instance = element.Instance,
-        SetText = function(text) label.Instance.Text = text end,
-        Destroy = function() element:Destroy() end,
-    }
-
-    table.insert(tab.Elements, api)
-    return api
-end
-
-function Window:_createToggle(tab, config)
-    config = config or {}
-    local element = self:_createBaseElement(tab, 40)
-
-    local label = Component.new("TextLabel", {
-        Size = UDim2.new(1, -60, 1, 0),
-        Position = UDim2.fromOffset(10, 0),
-        BackgroundTransparency = 1,
-        Text = config.Name or "Toggle",
-        TextColor3 = self.Theme.Text,
-        TextSize = 14,
-        FontFace = self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, element.Instance)
-
-    -- Toggle Switch
-    local switch = Component.new("Frame", {
-        Size = UDim2.fromOffset(44, 24),
-        Position = UDim2.new(1, -54, 0.5, -12),
-        BackgroundColor3 = self.Theme.Secondary,
-        BorderSizePixel = 0,
-    }, element.Instance)
-
-    local switchCorner = Instance.new("UICorner")
-    switchCorner.CornerRadius = UDim.new(1, 0)
-    switchCorner.Parent = switch.Instance
-
-    local knob = Component.new("Frame", {
-        Size = UDim2.fromOffset(18, 18),
-        Position = UDim2.fromOffset(3, 3),
-        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-        BorderSizePixel = 0,
-    }, switch.Instance)
-
-    local knobCorner = Instance.new("UICorner")
-    knobCorner.CornerRadius = UDim.new(1, 0)
-    knobCorner.Parent = knob.Instance
-
-    local state = config.Default or false
-    local callback = config.Callback or function() end
-
-    local function updateVisual()
-        if state then
-            Animation.Tween(switch.Instance, {BackgroundColor3 = self.Theme.Accent}, 0.2)
-            Animation.Tween(knob.Instance, {Position = UDim2.fromOffset(23, 3)}, 0.2, Utility.EaseOutBack)
-        else
-            Animation.Tween(switch.Instance, {BackgroundColor3 = self.Theme.Secondary}, 0.2)
-            Animation.Tween(knob.Instance, {Position = UDim2.fromOffset(3, 3)}, 0.2, Utility.EaseOutBack)
-        end
-    end
-
-    updateVisual()
-
-    element:Connect(element.Instance.InputBegan, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            state = not state
-            updateVisual()
-            local success, err = pcall(callback, state)
-            if not success then
-                warn("Rayfield Gen3 Toggle Error: " .. tostring(err))
-            end
-            EventBus.Emit("toggleChanged", api, state)
-        end
-    end)
-
-    -- API
-    local api = {
-        Instance = element.Instance,
-        Value = state,
-        Set = function(value)
-            state = value
-            updateVisual()
         end,
-        Get = function() return state end,
-        Destroy = function() element:Destroy() end,
-    }
 
-    table.insert(tab.Elements, api)
-    return api
-end
-
-function Window:_createSlider(tab, config)
-    config = config or {}
-    local element = self:_createBaseElement(tab, 50)
-
-    local label = Component.new("TextLabel", {
-        Size = UDim2.new(1, -20, 0, 20),
-        Position = UDim2.fromOffset(10, 5),
-        BackgroundTransparency = 1,
-        Text = config.Name or "Slider",
-        TextColor3 = self.Theme.Text,
-        TextSize = 14,
-        FontFace = self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, element.Instance)
-
-    -- Value Label
-    local valueLabel = Component.new("TextLabel", {
-        Size = UDim2.fromOffset(50, 20),
-        Position = UDim2.new(1, -60, 0, 5),
-        BackgroundTransparency = 1,
-        Text = tostring(config.Default or config.Min or 0),
-        TextColor3 = self.Theme.TextMuted,
-        TextSize = 12,
-        FontFace = self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Right,
-    }, element.Instance)
-
-    -- Track
-    local track = Component.new("Frame", {
-        Size = UDim2.new(1, -20, 0, 6),
-        Position = UDim2.fromOffset(10, 32),
-        BackgroundColor3 = self.Theme.Secondary,
-        BorderSizePixel = 0,
-    }, element.Instance)
-
-    local trackCorner = Instance.new("UICorner")
-    trackCorner.CornerRadius = UDim.new(1, 0)
-    trackCorner.Parent = track.Instance
-
-    -- Fill
-    local fill = Component.new("Frame", {
-        Size = UDim2.fromScale(0.5, 1),
-        BackgroundColor3 = self.Theme.Accent,
-        BorderSizePixel = 0,
-    }, track.Instance)
-
-    local fillCorner = Instance.new("UICorner")
-    fillCorner.CornerRadius = UDim.new(1, 0)
-    fillCorner.Parent = fill.Instance
-
-    -- Knob
-    local knob = Component.new("Frame", {
-        Size = UDim2.fromOffset(14, 14),
-        Position = UDim2.fromScale(0.5, 0.5),
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-        BorderSizePixel = 0,
-    }, track.Instance)
-
-    local knobCorner = Instance.new("UICorner")
-    knobCorner.CornerRadius = UDim.new(1, 0)
-    knobCorner.Parent = knob.Instance
-
-    local min = config.Min or 0
-    local max = config.Max or 100
-    local increment = config.Increment or 1
-    local value = config.Default or min
-    local callback = config.Callback or function() end
-    local dragging = false
-
-    local function updateVisual(percentage)
-        percentage = math.clamp(percentage, 0, 1)
-        Animation.Tween(fill.Instance, {Size = UDim2.fromScale(percentage, 1)}, 0.1)
-        Animation.Tween(knob.Instance, {Position = UDim2.fromScale(percentage, 0.5)}, 0.1)
-
-        local rawValue = min + (max - min) * percentage
-        value = math.floor(rawValue / increment + 0.5) * increment
-        valueLabel.Instance.Text = tostring(value)
-    end
-
-    local function calculatePercentage(input)
-        local trackPos = track.Instance.AbsolutePosition.X
-        local trackSize = track.Instance.AbsoluteSize.X
-        local mouseX = input.Position.X
-        return math.clamp((mouseX - trackPos) / trackSize, 0, 1)
-    end
-
-    element:Connect(track.Instance.InputBegan, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            local percentage = calculatePercentage(input)
-            updateVisual(percentage)
-        end
-    end)
-
-    element:Connect(Services.UserInputService.InputChanged, function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local percentage = calculatePercentage(input)
-            updateVisual(percentage)
-        end
-    end)
-
-    element:Connect(Services.UserInputService.InputEnded, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 and dragging then
-            dragging = false
-            local success, err = pcall(callback, value)
-            if not success then
-                warn("Rayfield Gen3 Slider Error: " .. tostring(err))
-            end
-            EventBus.Emit("sliderChanged", api, value)
-        end
-    end)
-
-    -- Initialize
-    updateVisual((value - min) / (max - min))
-
-    -- API
-    local api = {
-        Instance = element.Instance,
-        Value = value,
-        Set = function(newValue)
-            value = math.clamp(newValue, min, max)
-            updateVisual((value - min) / (max - min))
+        smoothStep = function(t)
+            return t * t * (3 - 2 * t)
         end,
-        Get = function() return value end,
-        Destroy = function() element:Destroy() end,
-    }
 
-    table.insert(tab.Elements, api)
-    return api
-end
-
-function Window:_createDropdown(tab, config)
-    config = config or {}
-    local element = self:_createBaseElement(tab, 40)
-
-    local label = Component.new("TextLabel", {
-        Size = UDim2.new(1, -120, 1, 0),
-        Position = UDim2.fromOffset(10, 0),
-        BackgroundTransparency = 1,
-        Text = config.Name or "Dropdown",
-        TextColor3 = self.Theme.Text,
-        TextSize = 14,
-        FontFace = self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, element.Instance)
-
-    -- Selected Value
-    local selected = Component.new("TextLabel", {
-        Size = UDim2.fromOffset(100, 30),
-        Position = UDim2.new(1, -110, 0.5, -15),
-        BackgroundColor3 = self.Theme.Secondary,
-        BackgroundTransparency = 0.5,
-        Text = config.Default or "Select...",
-        TextColor3 = self.Theme.Text,
-        TextSize = 12,
-        FontFace = self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Center,
-    }, element.Instance)
-
-    local selectedCorner = Instance.new("UICorner")
-    selectedCorner.CornerRadius = UDim.new(0, 4)
-    selectedCorner.Parent = selected.Instance
-
-    local options = config.Options or {}
-    local value = config.Default
-    local callback = config.Callback or function() end
-    local open = false
-
-    -- Dropdown Menu (created when opened)
-    local menu = nil
-
-    local function closeMenu()
-        if menu then
-            Animation.Tween(menu.Instance, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
-            task.delay(0.2, function()
-                if menu then menu:Destroy() menu = nil end
-            end)
+        smootherStep = function(t)
+            return t * t * t * (t * (t * 6 - 15) + 10)
         end
-        open = false
-    end
+    },
 
-    local function openMenu()
-        if open then closeMenu() return end
-        open = true
+    -- Spring-based tween for natural motion
+    SpringTween = function(self, object, properties, targetValues, config)
+        config = config or {}
+        local damping = config.damping or 0.8
+        local stiffness = config.stiffness or 300
+        local mass = config.mass or 1
+        local callback = config.callback
 
-        menu = Component.new("Frame", {
-            Size = UDim2.new(1, 0, 0, 0),
-            Position = UDim2.fromOffset(0, 45),
-            BackgroundColor3 = self.Theme.Surface,
-            BackgroundTransparency = 0.1,
-            BorderSizePixel = 0,
-            ClipsDescendants = true,
-            ZIndex = 10,
-        }, element.Instance)
+        local startTime = tick()
+        local startValues = {}
 
-        local menuCorner = Instance.new("UICorner")
-        menuCorner.CornerRadius = UDim.new(0, 6)
-        menuCorner.Parent = menu.Instance
+        for prop, target in pairs(targetValues) do
+            startValues[prop] = object[prop]
+        end
 
-        local menuLayout = Instance.new("UIListLayout")
-        menuLayout.FillDirection = Enum.FillDirection.Vertical
-        menuLayout.Parent = menu.Instance
+        local connection
+        connection = game:GetService("RunService").RenderStepped:Connect(function()
+            local elapsed = tick() - startTime
+            local t = math.clamp(elapsed / (mass * 2), 0, 1)
+            local eased = self._easingFunctions.spring(t, damping, stiffness)
 
-        for _, option in ipairs(options) do
-            local optionBtn = Component.new("TextButton", {
-                Size = UDim2.new(1, 0, 0, 30),
-                BackgroundTransparency = 1,
-                Text = option,
-                TextColor3 = self.Theme.Text,
-                TextSize = 12,
-                FontFace = self.Theme.Font,
-            }, menu.Instance)
-
-            optionBtn:Connect(optionBtn.Instance.MouseEnter, function()
-                Animation.Tween(optionBtn.Instance, {BackgroundTransparency = 0.8}, 0.1)
-            end)
-
-            optionBtn:Connect(optionBtn.Instance.MouseLeave, function()
-                Animation.Tween(optionBtn.Instance, {BackgroundTransparency = 1}, 0.1)
-            end)
-
-            optionBtn:Connect(optionBtn.Instance.MouseButton1Click, function()
-                value = option
-                selected.Instance.Text = option
-                closeMenu()
-                local success, err = pcall(callback, value)
-                if not success then
-                    warn("Rayfield Gen3 Dropdown Error: " .. tostring(err))
+            for prop, target in pairs(targetValues) do
+                local start = startValues[prop]
+                if typeof(start) == "UDim2" then
+                    object[prop] = UDim2.new(
+                        start.X.Scale + (target.X.Scale - start.X.Scale) * eased,
+                        start.X.Offset + (target.X.Offset - start.X.Offset) * eased,
+                        start.Y.Scale + (target.Y.Scale - start.Y.Scale) * eased,
+                        start.Y.Offset + (target.Y.Offset - start.Y.Offset) * eased
+                    )
+                elseif typeof(start) == "Color3" then
+                    object[prop] = start:Lerp(target, eased)
+                elseif typeof(start) == "number" then
+                    object[prop] = start + (target - start) * eased
+                elseif typeof(start) == "Vector2" then
+                    object[prop] = start:Lerp(target, eased)
                 end
-                EventBus.Emit("dropdownChanged", api, value)
+            end
+
+            if t >= 1 then
+                connection:Disconnect()
+                if callback then callback() end
+            end
+        end)
+
+        table.insert(self._activeTweens, connection)
+        return connection
+    end,
+
+    -- Stagger animation for lists
+    Stagger = function(self, objects, animationFunc, staggerDelay)
+        staggerDelay = staggerDelay or 0.05
+        for i, obj in ipairs(objects) do
+            task.delay((i - 1) * staggerDelay, function()
+                animationFunc(obj, i)
             end)
-        end
-
-        local targetHeight = math.min(#options * 30 + 10, 200)
-        Animation.Tween(menu.Instance, {Size = UDim2.new(1, 0, 0, targetHeight)}, 0.2, Utility.EaseOutBack)
-    end
-
-    element:Connect(element.Instance.MouseButton1Click, openMenu)
-
-    -- API
-    local api = {
-        Instance = element.Instance,
-        Value = value,
-        Set = function(newValue)
-            if table.find(options, newValue) then
-                value = newValue
-                selected.Instance.Text = newValue
-            end
-        end,
-        Get = function() return value end,
-        Refresh = function(newOptions)
-            options = newOptions
-            if not table.find(options, value) then
-                value = options[1]
-                selected.Instance.Text = value or "Select..."
-            end
-        end,
-        Destroy = function() 
-            closeMenu()
-            element:Destroy() 
-        end,
-    }
-
-    table.insert(tab.Elements, api)
-    return api
-end
-
-function Window:_createInput(tab, config)
-    config = config or {}
-    local element = self:_createBaseElement(tab, 40)
-
-    local label = Component.new("TextLabel", {
-        Size = UDim2.new(0.5, -10, 1, 0),
-        Position = UDim2.fromOffset(10, 0),
-        BackgroundTransparency = 1,
-        Text = config.Name or "Input",
-        TextColor3 = self.Theme.Text,
-        TextSize = 14,
-        FontFace = self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, element.Instance)
-
-    -- Input Box
-    local inputBox = Component.new("TextBox", {
-        Size = UDim2.new(0.5, -20, 0, 30),
-        Position = UDim2.new(0.5, 10, 0.5, -15),
-        BackgroundColor3 = self.Theme.Secondary,
-        BackgroundTransparency = 0.5,
-        Text = config.Default or "",
-        TextColor3 = self.Theme.Text,
-        TextSize = 12,
-        FontFace = self.Theme.Font,
-        PlaceholderText = config.Placeholder or "Enter text...",
-        PlaceholderColor3 = self.Theme.TextMuted,
-        ClearTextOnFocus = config.ClearOnFocus or false,
-    }, element.Instance)
-
-    local inputCorner = Instance.new("UICorner")
-    inputCorner.CornerRadius = UDim.new(0, 4)
-    inputCorner.Parent = inputBox.Instance
-
-    local callback = config.Callback or function() end
-    local numeric = config.Numeric or false
-
-    inputBox:Connect(inputBox.Instance.FocusLost, function(enterPressed)
-        local text = inputBox.Instance.Text
-        if numeric then
-            text = tonumber(text) or 0
-            inputBox.Instance.Text = tostring(text)
-        end
-        local success, err = pcall(callback, text, enterPressed)
-        if not success then
-            warn("Rayfield Gen3 Input Error: " .. tostring(err))
-        end
-        EventBus.Emit("inputChanged", api, text)
-    end)
-
-    -- API
-    local api = {
-        Instance = element.Instance,
-        Value = inputBox.Instance.Text,
-        Set = function(text)
-            inputBox.Instance.Text = tostring(text)
-        end,
-        Get = function() return inputBox.Instance.Text end,
-        Destroy = function() element:Destroy() end,
-    }
-
-    table.insert(tab.Elements, api)
-    return api
-end
-
-function Window:_createKeybind(tab, config)
-    config = config or {}
-    local element = self:_createBaseElement(tab, 40)
-
-    local label = Component.new("TextLabel", {
-        Size = UDim2.new(1, -100, 1, 0),
-        Position = UDim2.fromOffset(10, 0),
-        BackgroundTransparency = 1,
-        Text = config.Name or "Keybind",
-        TextColor3 = self.Theme.Text,
-        TextSize = 14,
-        FontFace = self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, element.Instance)
-
-    -- Key Display
-    local keyDisplay = Component.new("TextButton", {
-        Size = UDim2.fromOffset(80, 30),
-        Position = UDim2.new(1, -90, 0.5, -15),
-        BackgroundColor3 = self.Theme.Secondary,
-        BackgroundTransparency = 0.5,
-        Text = config.Default and config.Default.Name or "None",
-        TextColor3 = self.Theme.Text,
-        TextSize = 12,
-        FontFace = self.Theme.Font,
-        AutoButtonColor = false,
-    }, element.Instance)
-
-    local keyCorner = Instance.new("UICorner")
-    keyCorner.CornerRadius = UDim.new(0, 4)
-    keyCorner.Parent = keyDisplay.Instance
-
-    local keybind = config.Default or Enum.KeyCode.Unknown
-    local callback = config.Callback or function() end
-    local listening = false
-
-    local function updateDisplay()
-        keyDisplay.Instance.Text = keybind ~= Enum.KeyCode.Unknown and keybind.Name or "None"
-    end
-
-    keyDisplay:Connect(keyDisplay.Instance.MouseButton1Click, function()
-        listening = true
-        keyDisplay.Instance.Text = "..."
-    end)
-
-    element:Connect(Services.UserInputService.InputBegan, function(input, gameProcessed)
-        if gameProcessed then return end
-        if listening then
-            if input.KeyCode ~= Enum.KeyCode.Unknown then
-                keybind = input.KeyCode
-                listening = false
-                updateDisplay()
-                EventBus.Emit("keybindChanged", api, keybind)
-            end
-        elseif input.KeyCode == keybind then
-            local success, err = pcall(callback)
-            if not success then
-                warn("Rayfield Gen3 Keybind Error: " .. tostring(err))
-            end
-        end
-    end)
-
-    -- API
-    local api = {
-        Instance = element.Instance,
-        Value = keybind,
-        Set = function(key)
-            keybind = key
-            updateDisplay()
-        end,
-        Get = function() return keybind end,
-        Destroy = function() element:Destroy() end,
-    }
-
-    table.insert(tab.Elements, api)
-    return api
-end
-
-function Window:_createColorPicker(tab, config)
-    config = config or {}
-    local element = self:_createBaseElement(tab, 40)
-
-    local label = Component.new("TextLabel", {
-        Size = UDim2.new(1, -60, 1, 0),
-        Position = UDim2.fromOffset(10, 0),
-        BackgroundTransparency = 1,
-        Text = config.Name or "Color",
-        TextColor3 = self.Theme.Text,
-        TextSize = 14,
-        FontFace = self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, element.Instance)
-
-    -- Color Preview
-    local preview = Component.new("Frame", {
-        Size = UDim2.fromOffset(30, 30),
-        Position = UDim2.new(1, -45, 0.5, -15),
-        BackgroundColor3 = config.Default or Color3.fromRGB(255, 255, 255),
-        BorderSizePixel = 0,
-    }, element.Instance)
-
-    local previewCorner = Instance.new("UICorner")
-    previewCorner.CornerRadius = UDim.new(0, 6)
-    previewCorner.Parent = preview.Instance
-
-    local color = config.Default or Color3.fromRGB(255, 255, 255)
-    local callback = config.Callback or function() end
-    local open = false
-
-    -- Simple color picker (can be expanded)
-    element:Connect(element.Instance.MouseButton1Click, function()
-        -- Toggle a simple color selection
-        -- In a full implementation, this would open a color wheel
-        local colors = {
-            Color3.fromRGB(255, 0, 0),
-            Color3.fromRGB(0, 255, 0),
-            Color3.fromRGB(0, 0, 255),
-            Color3.fromRGB(255, 255, 0),
-            Color3.fromRGB(255, 0, 255),
-            Color3.fromRGB(0, 255, 255),
-            Color3.fromRGB(255, 255, 255),
-            Color3.fromRGB(0, 0, 0),
-        }
-
-        -- Cycle through colors for demo
-        local currentIndex = 1
-        for i, c in ipairs(colors) do
-            if c == color then
-                currentIndex = i
-                break
-            end
-        end
-
-        color = colors[(currentIndex % #colors) + 1]
-        Animation.Tween(preview.Instance, {BackgroundColor3 = color}, 0.2)
-
-        local success, err = pcall(callback, color)
-        if not success then
-            warn("Rayfield Gen3 ColorPicker Error: " .. tostring(err))
-        end
-        EventBus.Emit("colorChanged", api, color)
-    end)
-
-    -- API
-    local api = {
-        Instance = element.Instance,
-        Value = color,
-        Set = function(newColor)
-            color = newColor
-            preview.Instance.BackgroundColor3 = color
-        end,
-        Get = function() return color end,
-        Destroy = function() element:Destroy() end,
-    }
-
-    table.insert(tab.Elements, api)
-    return api
-end
-
-function Window:_createLabel(tab, config)
-    config = config or {}
-    local element = self:_createBaseElement(tab, 30)
-    element.Instance.BackgroundTransparency = 1
-
-    local label = Component.new("TextLabel", {
-        Size = UDim2.new(1, -20, 1, 0),
-        Position = UDim2.fromOffset(10, 0),
-        BackgroundTransparency = 1,
-        Text = config.Text or "Label",
-        TextColor3 = config.Color or self.Theme.TextMuted,
-        TextSize = config.Size or 12,
-        FontFace = config.Bold and self.Theme.TitleFont or self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextWrapped = true,
-    }, element.Instance)
-
-    -- API
-    local api = {
-        Instance = element.Instance,
-        SetText = function(text) label.Instance.Text = text end,
-        SetColor = function(color) label.Instance.TextColor3 = color end,
-        Destroy = function() element:Destroy() end,
-    }
-
-    table.insert(tab.Elements, api)
-    return api
-end
-
-function Window:_createSection(tab, config)
-    config = config or {}
-    local element = Component.new("Frame", {
-        Size = UDim2.new(1, 0, 0, 30),
-        BackgroundTransparency = 1,
-    }, tab.Page.Instance)
-
-    local line = Component.new("Frame", {
-        Size = UDim2.new(1, -20, 0, 1),
-        Position = UDim2.fromOffset(10, 15),
-        BackgroundColor3 = self.Theme.Secondary,
-        BackgroundTransparency = 0.5,
-        BorderSizePixel = 0,
-    }, element.Instance)
-
-    local label = Component.new("TextLabel", {
-        Size = UDim2.fromOffset(100, 20),
-        Position = UDim2.fromOffset(10, 5),
-        BackgroundColor3 = self.Theme.Background,
-        BackgroundTransparency = 0,
-        Text = config.Name or "Section",
-        TextColor3 = self.Theme.TextMuted,
-        TextSize = 11,
-        FontFace = self.Theme.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, element.Instance)
-
-    -- API
-    local api = {
-        Instance = element.Instance,
-        SetText = function(text) label.Instance.Text = text end,
-        Destroy = function() element:Destroy() end,
-    }
-
-    table.insert(tab.Elements, api)
-    return api
-end
-
--- Window Controls
-function Window:ToggleMinimize()
-    self._minimized = not self._minimized
-
-    if self._minimized then
-        Animation.Tween(self.Main.Instance, {Size = UDim2.new(self.Size.X.Scale, self.Size.X.Offset, 0, 40)}, 0.3)
-        self.ContentContainer.Instance.Visible = false
-        self.TabContainer.Instance.Visible = false
-    else
-        Animation.Tween(self.Main.Instance, {Size = self.Size}, 0.3, Utility.EaseOutBack)
-        self.ContentContainer.Instance.Visible = true
-        self.TabContainer.Instance.Visible = true
-    end
-
-    EventBus.Emit("windowMinimized", self, self._minimized)
-end
-
-function Window:ToggleCollapse()
-    self._collapsed = not self._collapsed
-
-    if self._collapsed then
-        Animation.Tween(self.Main.Instance, {Size = UDim2.fromOffset(0, 0)}, 0.3)
-        task.delay(0.3, function()
-            self.Instance.Enabled = false
-        end)
-    else
-        self.Instance.Enabled = true
-        Animation.Tween(self.Main.Instance, {Size = self.Size}, 0.3, Utility.EaseOutBack)
-    end
-
-    EventBus.Emit("windowCollapsed", self, self._collapsed)
-end
-
-function Window:Show()
-    self.Instance.Enabled = true
-    self.Main.Instance.Size = UDim2.fromOffset(0, 0)
-    Animation.Tween(self.Main.Instance, {Size = self.Size}, 0.5, Utility.EaseOutBack)
-    EventBus.Emit("windowShown", self)
-end
-
-function Window:Hide()
-    Animation.Tween(self.Main.Instance, {Size = UDim2.fromOffset(0, 0)}, 0.3)
-    task.delay(0.3, function()
-        self.Instance.Enabled = false
-    end)
-    EventBus.Emit("windowHidden", self)
-end
-
-function Window:Destroy()
-    for _, tab in ipairs(self._tabs) do
-        for _, element in ipairs(tab.Elements) do
-            if element.Destroy then element.Destroy() end
-        end
-    end
-
-    Component.Destroy(self)
-    EventBus.Emit("windowDestroyed", self)
-end
-
--- Notification System
-function Gen3.Notify(config)
-    config = config or {}
-
-    local notification = Component.new("Frame", {
-        Size = UDim2.fromOffset(300, 80),
-        Position = UDim2.new(1, -320, 1, -100),
-        BackgroundColor3 = Themes.Default.Surface,
-        BackgroundTransparency = 0.1,
-        BorderSizePixel = 0,
-    }, Services.CoreGui)
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = notification.Instance
-
-    local shadow = Instance.new("ImageLabel")
-    shadow.AnchorPoint = Vector2.new(0.5, 0.5)
-    shadow.Position = UDim2.fromScale(0.5, 0.5)
-    shadow.Size = UDim2.new(1, 30, 1, 30)
-    shadow.BackgroundTransparency = 1
-    shadow.Image = "rbxassetid://5554236805"
-    shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
-    shadow.ImageTransparency = 0.7
-    shadow.ScaleType = Enum.ScaleType.Slice
-    shadow.SliceCenter = Rect.new(23, 23, 277, 277)
-    shadow.ZIndex = -1
-    shadow.Parent = notification.Instance
-
-    local title = Component.new("TextLabel", {
-        Size = UDim2.new(1, -20, 0, 25),
-        Position = UDim2.fromOffset(10, 8),
-        BackgroundTransparency = 1,
-        Text = config.Title or "Notification",
-        TextColor3 = Themes.Default.Text,
-        TextSize = 16,
-        FontFace = Themes.Default.TitleFont,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, notification.Instance)
-
-    local content = Component.new("TextLabel", {
-        Size = UDim2.new(1, -20, 0, 40),
-        Position = UDim2.fromOffset(10, 35),
-        BackgroundTransparency = 1,
-        Text = config.Content or "",
-        TextColor3 = Themes.Default.TextMuted,
-        TextSize = 13,
-        FontFace = Themes.Default.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextWrapped = true,
-    }, notification.Instance)
-
-    -- Entrance
-    notification.Instance.Position = UDim2.new(1, 20, 1, -100)
-    Animation.Tween(notification.Instance, {Position = UDim2.new(1, -320, 1, -100)}, 0.5, Utility.EaseOutBack)
-
-    -- Auto dismiss
-    task.delay(config.Duration or 3, function()
-        Animation.Tween(notification.Instance, {Position = UDim2.new(1, 20, 1, -100)}, 0.3)
-        task.delay(0.3, function()
-            notification:Destroy()
-        end)
-    end)
-
-    return notification
-end
-
--- Main API
-function Gen3.CreateWindow(config)
-    return Window.new(config)
-end
-
-function Gen3.SetTheme(themeName)
-    -- Global theme setting (applies to new windows)
-    Gen3.CurrentTheme = Themes[themeName] or Themes.Default
-end
-
-function Gen3.GetThemes()
-    local themeList = {}
-    for name, _ in pairs(Themes) do
-        table.insert(themeList, name)
-    end
-    return themeList
-end
-
-function Gen3.On(event, callback)
-    return EventBus.On(event, callback)
-end
-
-function Gen3.Promise(executor)
-    return Promise.new(executor)
-end
-
--- Plugin System
-Gen3.Plugins = {}
-
-function Gen3.RegisterPlugin(name, plugin)
-    Gen3.Plugins[name] = plugin
-    if plugin.Init then
-        plugin.Init(Gen3)
-    end
-    EventBus.Emit("pluginRegistered", name, plugin)
-end
-
--- Debug Tools
-Gen3.Debug = {
-    Enabled = false,
-    Log = function(...)
-        if Gen3.Debug.Enabled then
-            print("[Rayfield Gen3 Debug]", ...)
         end
     end,
-    Inspect = function(object)
-        if Gen3.Debug.Enabled then
-            for key, value in pairs(object) do
-                print(key, "=", value)
-            end
-        end
+
+    -- Parallax effect for backgrounds
+    Parallax = function(self, layer, intensity, mousePos)
+        intensity = intensity or 0.1
+        local center = Vector2.new(0.5, 0.5)
+        local offset = (mousePos - center) * intensity
+        layer.Position = UDim2.new(0.5, offset.X, 0.5, offset.Y)
     end
 }
 
--- Hot Reload Support
-function Gen3.EnableHotReload()
-    -- Monitor script changes and reload automatically
-    -- This is a simplified version - full implementation would use file watchers
-    Gen3.Debug.Enabled = true
-    Gen3.Debug.Log("Hot reload enabled")
+-- 2. ACCESSIBILITY SYSTEM
+CoreEnhancements.Accessibility = {
+    _enabled = true,
+    _highContrast = false,
+    _reducedMotion = false,
+    _screenReader = false,
+    _fontScale = 1,
+
+    -- High contrast theme override
+    HighContrastTheme = {
+        WindowColor = Color3.fromRGB(0, 0, 0),
+        ElementBackground = Color3.fromRGB(255, 255, 255),
+        ElementStroke = Color3.fromRGB(255, 255, 0),
+        ContentColor = Color3.fromRGB(255, 255, 255),
+        AccentColor = Color3.fromRGB(0, 255, 255),
+        TitlingColor = Color3.fromRGB(255, 255, 0),
+    },
+
+    -- Focus indicators
+    CreateFocusIndicator = function(self, element)
+        local indicator = Instance.new("UIStroke")
+        indicator.Name = "FocusIndicator"
+        indicator.Thickness = 3
+        indicator.Color = Color3.fromRGB(0, 150, 255)
+        indicator.Transparency = 0
+        indicator.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+        element.Focused:Connect(function()
+            indicator.Parent = element
+            indicator.Transparency = 0
+        end)
+
+        element.FocusLost:Connect(function()
+            indicator.Transparency = 1
+            task.delay(0.3, function()
+                if indicator then indicator:Destroy() end
+            end)
+        end)
+
+        return indicator
+    end,
+
+    -- ARIA-like labels for screen readers
+    SetAriaLabel = function(self, element, label)
+        element:SetAttribute("aria-label", label)
+        element:SetAttribute("role", self:_getRole(element))
+    end,
+
+    _getRole = function(self, element)
+        if element:IsA("TextButton") or element:IsA("ImageButton") then
+            return "button"
+        elseif element:IsA("TextBox") then
+            return "textbox"
+        elseif element:IsA("Frame") and element:GetAttribute("slider") then
+            return "slider"
+        else
+            return "generic"
+        end
+    end,
+
+    -- Keyboard navigation
+    EnableKeyboardNavigation = function(self, window)
+        local focusIndex = 1
+        local focusableElements = {}
+
+        local function updateFocusable()
+            focusableElements = {}
+            for _, child in ipairs(window:GetDescendants()) do
+                if child:IsA("GuiButton") or child:IsA("TextBox") then
+                    table.insert(focusableElements, child)
+                end
+            end
+        end
+
+        game:GetService("UserInputService").InputBegan:Connect(function(input)
+            if input.KeyCode == Enum.KeyCode.Tab then
+                updateFocusable()
+                if #focusableElements > 0 then
+                    if game:GetService("UserInputService"):IsKeyDown(Enum.KeyCode.LeftShift) then
+                        focusIndex = focusIndex - 1
+                        if focusIndex < 1 then focusIndex = #focusableElements end
+                    else
+                        focusIndex = focusIndex + 1
+                        if focusIndex > #focusableElements then focusIndex = 1 end
+                    end
+
+                    local target = focusableElements[focusIndex]
+                    if target:IsA("TextBox") then
+                        target:CaptureFocus()
+                    end
+                end
+            end
+        end)
+    end
+}
+
+-- 3. PERFORMANCE OPTIMIZATIONS
+CoreEnhancements.Performance = {
+    _objectPool = {},
+    _maxPoolSize = 50,
+    _frameBudget = 16, -- ms per frame (60fps)
+    _lastFrameTime = 0,
+
+    -- Object pooling for frequently created/destroyed elements
+    Acquire = function(self, className, properties)
+        local pool = self._objectPool[className]
+        if pool and #pool > 0 then
+            local obj = table.remove(pool)
+            for prop, val in pairs(properties or {}) do
+                obj[prop] = val
+            end
+            obj.Visible = true
+            return obj
+        end
+        return Instance.new(className)
+    end,
+
+    Release = function(self, object)
+        local className = object.ClassName
+        local pool = self._objectPool[className]
+        if not pool then
+            pool = {}
+            self._objectPool[className] = pool
+        end
+
+        if #pool < self._maxPoolSize then
+            object.Parent = nil
+            object.Visible = false
+            table.insert(pool, object)
+        else
+            object:Destroy()
+        end
+    end,
+
+    -- Virtual scrolling for long lists
+    VirtualScroll = function(self, scrollingFrame, itemHeight, totalItems, renderCallback)
+        local visibleCount = math.ceil(scrollingFrame.AbsoluteSize.Y / itemHeight) + 2
+        local container = Instance.new("Frame")
+        container.Size = UDim2.new(1, 0, 0, totalItems * itemHeight)
+        container.BackgroundTransparency = 1
+        container.Parent = scrollingFrame
+
+        local items = {}
+        local function updateVisible()
+            local scrollPos = scrollingFrame.CanvasPosition.Y
+            local startIndex = math.floor(scrollPos / itemHeight)
+            local endIndex = math.min(startIndex + visibleCount, totalItems - 1)
+
+            -- Recycle items
+            for i, item in pairs(items) do
+                if i < startIndex or i > endIndex then
+                    item.Visible = false
+                end
+            end
+
+            for i = startIndex, endIndex do
+                if not items[i] then
+                    items[i] = renderCallback(i, container)
+                end
+                items[i].Visible = true
+                items[i].Position = UDim2.new(0, 0, 0, i * itemHeight)
+            end
+        end
+
+        scrollingFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(updateVisible)
+        updateVisible()
+    end,
+
+    -- Frame time budgeting
+    ShouldYield = function(self)
+        return (tick() - self._lastFrameTime) * 1000 > self._frameBudget
+    end,
+
+    MarkFrame = function(self)
+        self._lastFrameTime = tick()
+    end
+}
+
+-- 4. MODERN COMPONENT ENHANCEMENTS
+CoreEnhancements.ModernComponents = {
+
+    -- Chip/Tag component with removable chips
+    CreateChip = function(self, parent, config)
+        config = config or {}
+        local chip = Instance.new("Frame")
+        chip.Name = config.name or "Chip"
+        chip.Size = UDim2.new(0, 0, 0, 32)
+        chip.AutomaticSize = Enum.AutomaticSize.X
+        chip.BackgroundColor3 = config.backgroundColor or Color3.fromRGB(45, 45, 45)
+        chip.BorderSizePixel = 0
+        chip.Parent = parent
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(1, 0)
+        corner.Parent = chip
+
+        local padding = Instance.new("UIPadding")
+        padding.PaddingLeft = UDim.new(0, 12)
+        padding.PaddingRight = UDim.new(0, 12)
+        padding.Parent = chip
+
+        local layout = Instance.new("UIListLayout")
+        layout.FillDirection = Enum.FillDirection.Horizontal
+        layout.VerticalAlignment = Enum.VerticalAlignment.Center
+        layout.Padding = UDim.new(0, 6)
+        layout.Parent = chip
+
+        if config.icon then
+            local icon = Instance.new("ImageLabel")
+            icon.Size = UDim2.fromOffset(16, 16)
+            icon.BackgroundTransparency = 1
+            icon.Image = config.icon
+            icon.ImageColor3 = config.iconColor or Color3.fromRGB(255, 255, 255)
+            icon.Parent = chip
+        end
+
+        local text = Instance.new("TextLabel")
+        text.Size = UDim2.fromOffset(0, 20)
+        text.AutomaticSize = Enum.AutomaticSize.X
+        text.BackgroundTransparency = 1
+        text.Text = config.text or "Chip"
+        text.TextColor3 = config.textColor or Color3.fromRGB(255, 255, 255)
+        text.TextSize = 14
+        text.Font = Enum.Font.GothamMedium
+        text.Parent = chip
+
+        if config.removable then
+            local removeBtn = Instance.new("TextButton")
+            removeBtn.Size = UDim2.fromOffset(16, 16)
+            removeBtn.BackgroundTransparency = 1
+            removeBtn.Text = "✕"
+            removeBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+            removeBtn.TextSize = 12
+            removeBtn.Parent = chip
+
+            removeBtn.MouseEnter:Connect(function()
+                removeBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+            end)
+            removeBtn.MouseLeave:Connect(function()
+                removeBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+            end)
+
+            removeBtn.MouseButton1Click:Connect(function()
+                if config.onRemove then
+                    config.onRemove(chip)
+                end
+                chip:Destroy()
+            end)
+        end
+
+        -- Hover effect
+        chip.MouseEnter:Connect(function()
+            chip.BackgroundColor3 = config.hoverColor or Color3.fromRGB(60, 60, 60)
+        end)
+        chip.MouseLeave:Connect(function()
+            chip.BackgroundColor3 = config.backgroundColor or Color3.fromRGB(45, 45, 45)
+        end)
+
+        return chip
+    end,
+
+    -- Skeleton loader for async content
+    CreateSkeleton = function(self, parent, config)
+        config = config or {}
+        local skeleton = Instance.new("Frame")
+        skeleton.Name = "Skeleton"
+        skeleton.Size = config.size or UDim2.new(1, 0, 0, 60)
+        skeleton.BackgroundTransparency = 1
+        skeleton.Parent = parent
+
+        local shimmer = Instance.new("Frame")
+        shimmer.Name = "Shimmer"
+        shimmer.Size = UDim2.new(0.3, 0, 1, 0)
+        shimmer.Position = UDim2.new(-0.3, 0, 0, 0)
+        shimmer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        shimmer.BackgroundTransparency = 0.8
+        shimmer.Parent = skeleton
+
+        local gradient = Instance.new("UIGradient")
+        gradient.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1),
+            NumberSequenceKeypoint.new(0.5, 0.5),
+            NumberSequenceKeypoint.new(1, 1)
+        })
+        gradient.Rotation = 15
+        gradient.Parent = shimmer
+
+        -- Shimmer animation
+        local tweenService = game:GetService("TweenService")
+        local function animate()
+            shimmer.Position = UDim2.new(-0.3, 0, 0, 0)
+            local tween = tweenService:Create(shimmer, TweenInfo.new(1.5, Enum.EasingStyle.Quart), {
+                Position = UDim2.new(1, 0, 0, 0)
+            })
+            tween:Play()
+            tween.Completed:Wait()
+            if skeleton and skeleton.Parent then
+                task.wait(0.5)
+                animate()
+            end
+        end
+        task.spawn(animate)
+
+        skeleton.Destroying:Connect(function()
+            shimmer = nil
+        end)
+
+        return skeleton
+    end,
+
+    -- Tooltip system
+    CreateTooltip = function(self, parent, config)
+        config = config or {}
+        local tooltip = Instance.new("Frame")
+        tooltip.Name = "Tooltip"
+        tooltip.Size = UDim2.new(0, 0, 0, 28)
+        tooltip.AutomaticSize = Enum.AutomaticSize.X
+        tooltip.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        tooltip.BorderSizePixel = 0
+        tooltip.ZIndex = 1000
+        tooltip.Visible = false
+        tooltip.Parent = parent
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 6)
+        corner.Parent = tooltip
+
+        local padding = Instance.new("UIPadding")
+        padding.PaddingLeft = UDim.new(0, 10)
+        padding.PaddingRight = UDim.new(0, 10)
+        padding.Parent = tooltip
+
+        local text = Instance.new("TextLabel")
+        text.Size = UDim2.fromOffset(0, 28)
+        text.AutomaticSize = Enum.AutomaticSize.X
+        text.BackgroundTransparency = 1
+        text.Text = config.text or "Tooltip"
+        text.TextColor3 = Color3.fromRGB(255, 255, 255)
+        text.TextSize = 13
+        text.Font = Enum.Font.GothamMedium
+        text.Parent = tooltip
+
+        local arrow = Instance.new("Frame")
+        arrow.Size = UDim2.fromOffset(8, 8)
+        arrow.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        arrow.BorderSizePixel = 0
+        arrow.Rotation = 45
+        arrow.Parent = tooltip
+
+        return tooltip
+    end,
+
+    -- Progress ring/circular progress
+    CreateCircularProgress = function(self, parent, config)
+        config = config or {}
+        local size = config.size or 60
+        local progress = config.progress or 0
+
+        local container = Instance.new("Frame")
+        container.Size = UDim2.fromOffset(size, size)
+        container.BackgroundTransparency = 1
+        container.Parent = parent
+
+        local bg = Instance.new("Frame")
+        bg.Name = "Background"
+        bg.Size = UDim2.fromScale(1, 1)
+        bg.BackgroundTransparency = 1
+        bg.Parent = container
+
+        -- Create circular progress using image or custom drawing
+        local progressLabel = Instance.new("TextLabel")
+        progressLabel.Name = "ProgressText"
+        progressLabel.Size = UDim2.fromScale(1, 1)
+        progressLabel.BackgroundTransparency = 1
+        progressLabel.Text = tostring(math.floor(progress * 100)) .. "%"
+        progressLabel.TextColor3 = config.textColor or Color3.fromRGB(255, 255, 255)
+        progressLabel.TextSize = 16
+        progressLabel.Font = Enum.Font.GothamBold
+        progressLabel.Parent = container
+
+        local function setProgress(value)
+            progress = math.clamp(value, 0, 1)
+            progressLabel.Text = tostring(math.floor(progress * 100)) .. "%"
+            -- Update visual ring here
+        end
+
+        return {
+            Instance = container,
+            SetProgress = setProgress,
+            GetProgress = function() return progress end
+        }
+    end,
+
+    -- Segmented control (iOS-style)
+    CreateSegmentedControl = function(self, parent, config)
+        config = config or {}
+        local options = config.options or {"Option 1", "Option 2"}
+        local selectedIndex = config.selectedIndex or 1
+        local callback = config.callback or function() end
+
+        local container = Instance.new("Frame")
+        container.Size = UDim2.new(1, 0, 0, 36)
+        container.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        container.BorderSizePixel = 0
+        container.Parent = parent
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 8)
+        corner.Parent = container
+
+        local layout = Instance.new("UIListLayout")
+        layout.FillDirection = Enum.FillDirection.Horizontal
+        layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        layout.VerticalAlignment = Enum.VerticalAlignment.Center
+        layout.Padding = UDim.new(0, 2)
+        layout.Parent = container
+
+        local padding = Instance.new("UIPadding")
+        padding.PaddingLeft = UDim.new(0, 2)
+        padding.PaddingRight = UDim.new(0, 2)
+        padding.Parent = container
+
+        local buttons = {}
+        local indicator = Instance.new("Frame")
+        indicator.Name = "Indicator"
+        indicator.BackgroundColor3 = config.indicatorColor or Color3.fromRGB(60, 60, 60)
+        indicator.BorderSizePixel = 0
+        indicator.ZIndex = 2
+        indicator.Parent = container
+
+        local indicatorCorner = Instance.new("UICorner")
+        indicatorCorner.CornerRadius = UDim.new(0, 6)
+        indicatorCorner.Parent = indicator
+
+        for i, option in ipairs(options) do
+            local btn = Instance.new("TextButton")
+            btn.Name = option
+            btn.Size = UDim2.new(1 / #options, -2, 1, -4)
+            btn.BackgroundTransparency = 1
+            btn.Text = option
+            btn.TextColor3 = i == selectedIndex and (config.activeTextColor or Color3.fromRGB(255, 255, 255)) or (config.inactiveTextColor or Color3.fromRGB(150, 150, 150))
+            btn.TextSize = 14
+            btn.Font = Enum.Font.GothamMedium
+            btn.ZIndex = 3
+            btn.Parent = container
+
+            table.insert(buttons, btn)
+
+            btn.MouseButton1Click:Connect(function()
+                selectedIndex = i
+                callback(option, i)
+
+                for j, b in ipairs(buttons) do
+                    b.TextColor3 = j == selectedIndex and (config.activeTextColor or Color3.fromRGB(255, 255, 255)) or (config.inactiveTextColor or Color3.fromRGB(150, 150, 150))
+                end
+
+                local tweenService = game:GetService("TweenService")
+                tweenService:Create(indicator, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {
+                    Position = btn.Position,
+                    Size = btn.Size
+                }):Play()
+            end)
+        end
+
+        -- Position indicator initially
+        task.delay(0.1, function()
+            if buttons[selectedIndex] then
+                indicator.Position = buttons[selectedIndex].Position
+                indicator.Size = buttons[selectedIndex].Size
+            end
+        end)
+
+        return {
+            Instance = container,
+            GetSelected = function() return options[selectedIndex], selectedIndex end,
+            SetSelected = function(index)
+                if buttons[index] then
+                    buttons[index].MouseButton1Click:Fire()
+                end
+            end
+        }
+    end,
+
+    -- Floating action button (FAB)
+    CreateFAB = function(self, parent, config)
+        config = config or {}
+        local fab = Instance.new("ImageButton")
+        fab.Name = "FAB"
+        fab.Size = UDim2.fromOffset(56, 56)
+        fab.Position = config.position or UDim2.new(1, -76, 1, -76)
+        fab.AnchorPoint = Vector2.new(0, 0)
+        fab.BackgroundColor3 = config.backgroundColor or Color3.fromRGB(0, 150, 255)
+        fab.Image = config.icon or ""
+        fab.ImageColor3 = config.iconColor or Color3.fromRGB(255, 255, 255)
+        fab.Parent = parent
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(1, 0)
+        corner.Parent = fab
+
+        local shadow = Instance.new("ImageLabel")
+        shadow.Name = "Shadow"
+        shadow.Size = UDim2.new(1, 8, 1, 8)
+        shadow.Position = UDim2.new(0, -4, 0, -4)
+        shadow.BackgroundTransparency = 1
+        shadow.Image = "rbxassetid://1316045217" -- shadow image
+        shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+        shadow.ImageTransparency = 0.6
+        shadow.ZIndex = -1
+        shadow.Parent = fab
+
+        -- Ripple effect
+        fab.MouseButton1Down:Connect(function()
+            local ripple = Instance.new("Frame")
+            ripple.Size = UDim2.fromOffset(0, 0)
+            ripple.Position = UDim2.new(0.5, 0, 0.5, 0)
+            ripple.AnchorPoint = Vector2.new(0.5, 0.5)
+            ripple.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            ripple.BackgroundTransparency = 0.7
+            ripple.BorderSizePixel = 0
+            ripple.ZIndex = 2
+            ripple.Parent = fab
+
+            local rippleCorner = Instance.new("UICorner")
+            rippleCorner.CornerRadius = UDim.new(1, 0)
+            rippleCorner.Parent = ripple
+
+            local tweenService = game:GetService("TweenService")
+            tweenService:Create(ripple, TweenInfo.new(0.5, Enum.EasingStyle.Quart), {
+                Size = UDim2.new(1.5, 0, 1.5, 0),
+                BackgroundTransparency = 1
+            }):Play()
+
+            task.delay(0.5, function()
+                ripple:Destroy()
+            end)
+        end)
+
+        -- Hover scale
+        fab.MouseEnter:Connect(function()
+            local tweenService = game:GetService("TweenService")
+            tweenService:Create(fab, TweenInfo.new(0.2), {
+                Size = UDim2.fromOffset(60, 60)
+            }):Play()
+        end)
+
+        fab.MouseLeave:Connect(function()
+            local tweenService = game:GetService("TweenService")
+            tweenService:Create(fab, TweenInfo.new(0.2), {
+                Size = UDim2.fromOffset(56, 56)
+            }):Play()
+        end)
+
+        return fab
+    end,
+
+    -- Timeline component
+    CreateTimeline = function(self, parent, config)
+        config = config or {}
+        local items = config.items or {}
+
+        local container = Instance.new("Frame")
+        container.Size = UDim2.new(1, 0, 0, #items * 60)
+        container.BackgroundTransparency = 1
+        container.Parent = parent
+
+        local layout = Instance.new("UIListLayout")
+        layout.Padding = UDim.new(0, 0)
+        layout.Parent = container
+
+        for i, item in ipairs(items) do
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, 0, 0, 60)
+            row.BackgroundTransparency = 1
+            row.Parent = container
+
+            -- Timeline line
+            local line = Instance.new("Frame")
+            line.Size = UDim2.new(0, 2, 1, 0)
+            line.Position = UDim2.new(0, 20, 0, 0)
+            line.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            line.BorderSizePixel = 0
+            line.Parent = row
+
+            if i == #items then
+                line.Size = UDim2.new(0, 2, 0, 30)
+            end
+
+            -- Dot
+            local dot = Instance.new("Frame")
+            dot.Size = UDim2.fromOffset(12, 12)
+            dot.Position = UDim2.new(0, 15, 0, 14)
+            dot.BackgroundColor3 = item.completed and (config.completedColor or Color3.fromRGB(0, 200, 100)) or (config.pendingColor or Color3.fromRGB(150, 150, 150))
+            dot.BorderSizePixel = 0
+            dot.Parent = row
+
+            local dotCorner = Instance.new("UICorner")
+            dotCorner.CornerRadius = UDim.new(1, 0)
+            dotCorner.Parent = dot
+
+            -- Content
+            local content = Instance.new("Frame")
+            content.Size = UDim2.new(1, -50, 1, 0)
+            content.Position = UDim2.new(0, 40, 0, 0)
+            content.BackgroundTransparency = 1
+            content.Parent = row
+
+            local title = Instance.new("TextLabel")
+            title.Size = UDim2.new(1, 0, 0, 20)
+            title.Position = UDim2.new(0, 0, 0, 10)
+            title.BackgroundTransparency = 1
+            title.Text = item.title or "Step " .. i
+            title.TextColor3 = Color3.fromRGB(255, 255, 255)
+            title.TextSize = 14
+            title.Font = Enum.Font.GothamMedium
+            title.TextXAlignment = Enum.TextXAlignment.Left
+            title.Parent = content
+
+            if item.description then
+                local desc = Instance.new("TextLabel")
+                desc.Size = UDim2.new(1, 0, 0, 16)
+                desc.Position = UDim2.new(0, 0, 0, 30)
+                desc.BackgroundTransparency = 1
+                desc.Text = item.description
+                desc.TextColor3 = Color3.fromRGB(180, 180, 180)
+                desc.TextSize = 12
+                desc.Font = Enum.Font.Gotham
+                desc.TextXAlignment = Enum.TextXAlignment.Left
+                desc.Parent = content
+            end
+        end
+
+        return container
+    end
+}
+
+-- 5. THEME SYSTEM ENHANCEMENTS
+CoreEnhancements.ThemeSystem = {
+    _currentTheme = "default",
+    _themes = {},
+    _listeners = {},
+
+    -- Glassmorphism theme
+    GlassTheme = {
+        name = "Glass",
+        WindowColor = Color3.fromRGB(20, 20, 30),
+        WindowTransparency = 0.3,
+        ElementBackground = Color3.fromRGB(255, 255, 255),
+        ElementTransparency = 0.85,
+        ElementStroke = Color3.fromRGB(255, 255, 255),
+        ElementStrokeTransparency = 0.9,
+        ContentColor = Color3.fromRGB(255, 255, 255),
+        AccentColor = Color3.fromRGB(100, 150, 255),
+        TitlingColor = Color3.fromRGB(255, 255, 255),
+        BlurEnabled = true,
+        BlurIntensity = 15,
+        CornerRadius = 12,
+    },
+
+    -- Neon/Cyberpunk theme
+    NeonTheme = {
+        name = "Neon",
+        WindowColor = Color3.fromRGB(10, 10, 20),
+        ElementBackground = Color3.fromRGB(20, 20, 40),
+        ElementStroke = Color3.fromRGB(0, 255, 255),
+        ContentColor = Color3.fromRGB(0, 255, 255),
+        AccentColor = Color3.fromRGB(255, 0, 255),
+        TitlingColor = Color3.fromRGB(0, 255, 255),
+        GlowEnabled = true,
+        GlowColor = Color3.fromRGB(0, 255, 255),
+        CornerRadius = 4,
+    },
+
+    -- Minimal/Apple-style theme
+    MinimalTheme = {
+        name = "Minimal",
+        WindowColor = Color3.fromRGB(245, 245, 247),
+        ElementBackground = Color3.fromRGB(255, 255, 255),
+        ElementStroke = Color3.fromRGB(200, 200, 200),
+        ContentColor = Color3.fromRGB(30, 30, 30),
+        AccentColor = Color3.fromRGB(0, 122, 255),
+        TitlingColor = Color3.fromRGB(0, 0, 0),
+        Font = Enum.Font.SFPro,
+        CornerRadius = 10,
+        ShadowEnabled = true,
+    },
+
+    RegisterTheme = function(self, name, theme)
+        self._themes[name] = theme
+    end,
+
+    ApplyTheme = function(self, name, window)
+        local theme = self._themes[name] or self._themes["default"]
+        self._currentTheme = name
+
+        -- Apply to window
+        if window then
+            if theme.BlurEnabled then
+                -- Add blur effect
+                local blur = Instance.new("BlurEffect")
+                blur.Size = theme.BlurIntensity or 10
+                blur.Parent = game:GetService("Lighting")
+            end
+
+            -- Notify listeners
+            for _, listener in ipairs(self._listeners) do
+                listener(theme)
+            end
+        end
+
+        return theme
+    end,
+
+    OnThemeChange = function(self, callback)
+        table.insert(self._listeners, callback)
+    end
+}
+
+-- Register built-in themes
+CoreEnhancements.ThemeSystem:RegisterTheme("glass", CoreEnhancements.ThemeSystem.GlassTheme)
+CoreEnhancements.ThemeSystem:RegisterTheme("neon", CoreEnhancements.ThemeSystem.NeonTheme)
+CoreEnhancements.ThemeSystem:RegisterTheme("minimal", CoreEnhancements.ThemeSystem.MinimalTheme)
+
+-- 6. DATA BINDING SYSTEM
+CoreEnhancements.DataBinding = {
+    _bindings = {},
+
+    CreateBinding = function(self, initialValue)
+        local binding = {
+            _value = initialValue,
+            _listeners = {},
+
+            Get = function(this)
+                return this._value
+            end,
+
+            Set = function(this, newValue)
+                if this._value ~= newValue then
+                    this._value = newValue
+                    for _, listener in ipairs(this._listeners) do
+                        listener(newValue)
+                    end
+                end
+            end,
+
+            Connect = function(this, callback)
+                table.insert(this._listeners, callback)
+                callback(this._value) -- Initial call
+                return function()
+                    for i, l in ipairs(this._listeners) do
+                        if l == callback then
+                            table.remove(this._listeners, i)
+                            break
+                        end
+                    end
+                end
+            end
+        }
+
+        return binding
+    end,
+
+    -- Two-way binding for input elements
+    BindToTextBox = function(self, textBox, binding)
+        local connection = binding:Connect(function(value)
+            if textBox.Text ~= tostring(value) then
+                textBox.Text = tostring(value)
+            end
+        end)
+
+        textBox.FocusLost:Connect(function()
+            binding:Set(textBox.Text)
+        end)
+
+        return connection
+    end,
+
+    BindToToggle = function(self, toggle, binding)
+        local connection = binding:Connect(function(value)
+            -- Update toggle visual state
+            if toggle.Set then
+                toggle:Set(value)
+            end
+        end)
+
+        -- Assuming toggle has a callback
+        if toggle.callback then
+            local originalCallback = toggle.callback
+            toggle.callback = function(value)
+                binding:Set(value)
+                if originalCallback then
+                    originalCallback(value)
+                end
+            end
+        end
+
+        return connection
+    end
+}
+
+-- 7. NOTIFICATION ENHANCEMENTS
+CoreEnhancements.NotificationSystem = {
+    _queue = {},
+    _maxVisible = 3,
+    _currentNotifications = {},
+
+    -- Rich notification with actions
+    ShowRichNotification = function(self, config)
+        config = config or {}
+        local notification = {
+            title = config.title or "Notification",
+            message = config.message or "",
+            type = config.type or "info", -- info, success, warning, error
+            duration = config.duration or 5,
+            actions = config.actions or {},
+            icon = config.icon,
+            progress = config.progress, -- Optional progress bar
+        }
+
+        table.insert(self._queue, notification)
+        self:_processQueue()
+
+        return notification
+    end,
+
+    _processQueue = function(self)
+        while #self._queue > 0 and #self._currentNotifications < self._maxVisible do
+            local notif = table.remove(self._queue, 1)
+            self:_displayNotification(notif)
+        end
+    end,
+
+    _displayNotification = function(self, notif)
+        -- Create notification UI
+        local colors = {
+            info = Color3.fromRGB(0, 150, 255),
+            success = Color3.fromRGB(0, 200, 100),
+            warning = Color3.fromRGB(255, 180, 0),
+            error = Color3.fromRGB(255, 80, 80)
+        }
+
+        -- Implementation would create the actual UI here
+        -- This is a simplified version
+        print(string.format("[Notification] %s: %s", notif.title, notif.message))
+    end
+}
+
+-- 8. DRAG AND DROP SYSTEM
+CoreEnhancements.DragDrop = {
+    _draggableItems = {},
+    _dropZones = {},
+
+    MakeDraggable = function(self, element, config)
+        config = config or {}
+        local dragData = {
+            element = element,
+            dragStarted = config.onDragStart,
+            dragEnded = config.onDragEnd,
+            dragPreview = config.preview,
+            isDragging = false,
+            startPos = nil,
+            offset = nil
+        }
+
+        element.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+               input.UserInputType == Enum.UserInputType.Touch then
+                dragData.isDragging = true
+                dragData.startPos = element.Position
+                dragData.offset = Vector2.new(input.Position.X, input.Position.Y) - 
+                                  Vector2.new(element.AbsolutePosition.X, element.AbsolutePosition.Y)
+
+                if dragData.dragStarted then
+                    dragData.dragStarted(element)
+                end
+            end
+        end)
+
+        game:GetService("UserInputService").InputChanged:Connect(function(input)
+            if dragData.isDragging and 
+               (input.UserInputType == Enum.UserInputType.MouseMovement or 
+                input.UserInputType == Enum.UserInputType.Touch) then
+                local newPos = Vector2.new(input.Position.X, input.Position.Y) - dragData.offset
+                element.Position = UDim2.new(0, newPos.X, 0, newPos.Y)
+            end
+        end)
+
+        game:GetService("UserInputService").InputEnded:Connect(function(input)
+            if dragData.isDragging and 
+               (input.UserInputType == Enum.UserInputType.MouseButton1 or 
+                input.UserInputType == Enum.UserInputType.Touch) then
+                dragData.isDragging = false
+
+                -- Check drop zones
+                for _, zone in ipairs(self._dropZones) do
+                    if self:_isInZone(element, zone) then
+                        if zone.onDrop then
+                            zone.onDrop(element, zone.element)
+                        end
+                    end
+                end
+
+                if dragData.dragEnded then
+                    dragData.dragEnded(element)
+                end
+            end
+        end)
+
+        table.insert(self._draggableItems, dragData)
+        return dragData
+    end,
+
+    CreateDropZone = function(self, element, config)
+        config = config or {}
+        local zone = {
+            element = element,
+            onDrop = config.onDrop,
+            onEnter = config.onEnter,
+            onLeave = config.onLeave,
+            highlightColor = config.highlightColor or Color3.fromRGB(0, 150, 255)
+        }
+        table.insert(self._dropZones, zone)
+        return zone
+    end,
+
+    _isInZone = function(self, item, zone)
+        local itemCenter = Vector2.new(
+            item.AbsolutePosition.X + item.AbsoluteSize.X / 2,
+            item.AbsolutePosition.Y + item.AbsoluteSize.Y / 2
+        )
+        local zonePos = zone.element.AbsolutePosition
+        local zoneSize = zone.element.AbsoluteSize
+
+        return itemCenter.X >= zonePos.X and itemCenter.X <= zonePos.X + zoneSize.X and
+               itemCenter.Y >= zonePos.Y and itemCenter.Y <= zonePos.Y + zoneSize.Y
+    end
+}
+
+-- 9. GESTURE SUPPORT
+CoreEnhancements.Gestures = {
+    _gestureListeners = {},
+
+    -- Swipe detection
+    DetectSwipe = function(self, element, config)
+        config = config or {}
+        local threshold = config.threshold or 50
+        local onSwipeLeft = config.onSwipeLeft
+        local onSwipeRight = config.onSwipeRight
+        local onSwipeUp = config.onSwipeUp
+        local onSwipeDown = config.onSwipeDown
+
+        local startPos = nil
+        local startTime = nil
+
+        element.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or 
+               input.UserInputType == Enum.UserInputType.MouseButton1 then
+                startPos = Vector2.new(input.Position.X, input.Position.Y)
+                startTime = tick()
+            end
+        end)
+
+        element.InputEnded:Connect(function(input)
+            if startPos and (input.UserInputType == Enum.UserInputType.Touch or 
+                            input.UserInputType == Enum.UserInputType.MouseButton1) then
+                local endPos = Vector2.new(input.Position.X, input.Position.Y)
+                local delta = endPos - startPos
+                local elapsed = tick() - startTime
+
+                -- Check velocity
+                local velocity = delta.Magnitude / elapsed
+
+                if delta.Magnitude > threshold and velocity > 500 then
+                    if math.abs(delta.X) > math.abs(delta.Y) then
+                        if delta.X > 0 and onSwipeRight then
+                            onSwipeRight()
+                        elseif delta.X < 0 and onSwipeLeft then
+                            onSwipeLeft()
+                        end
+                    else
+                        if delta.Y > 0 and onSwipeDown then
+                            onSwipeDown()
+                        elseif delta.Y < 0 and onSwipeUp then
+                            onSwipeUp()
+                        end
+                    end
+                end
+
+                startPos = nil
+            end
+        end)
+    end,
+
+    -- Pinch to zoom
+    DetectPinch = function(self, element, config)
+        config = config or {}
+        local onPinch = config.onPinch or function() end
+
+        local initialDistance = nil
+        local initialScale = element.Size
+
+        -- Simplified pinch detection (would need multi-touch handling)
+        -- This is a placeholder for the concept
+    end
+}
+
+-- 10. INTERNATIONALIZATION (i18n)
+CoreEnhancements.I18n = {
+    _currentLocale = "en",
+    _translations = {},
+    _fallbackLocale = "en",
+
+    LoadTranslations = function(self, locale, translations)
+        self._translations[locale] = translations
+    end,
+
+    SetLocale = function(self, locale)
+        self._currentLocale = locale
+    end,
+
+    T = function(self, key, params)
+        local translations = self._translations[self._currentLocale] or 
+                          self._translations[self._fallbackLocale] or {}
+        local text = translations[key] or key
+
+        if params then
+            for k, v in pairs(params) do
+                text = text:gsub("{{" .. k .. "}}", tostring(v))
+            end
+        end
+
+        return text
+    end,
+
+    -- RTL support detection
+    IsRTL = function(self, locale)
+        local rtlLocales = {ar = true, he = true, fa = true, ur = true}
+        return rtlLocales[locale or self._currentLocale] or false
+    end
+}
+
+-- =============================================================================
+-- ENHANCED RAYFIELD API
+-- =============================================================================
+
+function EnhancedRayfield:CreateWindow(config)
+    config = config or {}
+
+    -- Apply enhancements to base config
+    config.enhanced = true
+    config.animationSystem = CoreEnhancements.AnimationSystem
+    config.accessibility = CoreEnhancements.Accessibility
+    config.performance = CoreEnhancements.Performance
+
+    -- Create enhanced window (would integrate with base Rayfield)
+    local window = {
+        _config = config,
+        _tabs = {},
+        _enhancements = CoreEnhancements,
+
+        -- Enhanced methods
+        CreateTab = function(self, tabConfig)
+            tabConfig = tabConfig or {}
+            local tab = {
+                _elements = {},
+                _window = self,
+
+                CreateButton = function(t, btnConfig)
+                    btnConfig = btnConfig or {}
+                    -- Add enhanced button with ripple, better animations
+                    print(string.format("[Enhanced] Created button: %s", btnConfig.name or "Unnamed"))
+                    return {type = "Button", config = btnConfig}
+                end,
+
+                CreateToggle = function(t, toggleConfig)
+                    toggleConfig = toggleConfig or {}
+                    print(string.format("[Enhanced] Created toggle: %s", toggleConfig.name or "Unnamed"))
+                    return {type = "Toggle", config = toggleConfig}
+                end,
+
+                CreateSlider = function(t, sliderConfig)
+                    sliderConfig = sliderConfig or {}
+                    print(string.format("[Enhanced] Created slider: %s", sliderConfig.name or "Unnamed"))
+                    return {type = "Slider", config = sliderConfig}
+                end,
+
+                CreateDropdown = function(t, dropdownConfig)
+                    dropdownConfig = dropdownConfig or {}
+                    print(string.format("[Enhanced] Created dropdown: %s", dropdownConfig.name or "Unnamed"))
+                    return {type = "Dropdown", config = dropdownConfig}
+                end,
+
+                CreateInput = function(t, inputConfig)
+                    inputConfig = inputConfig or {}
+                    print(string.format("[Enhanced] Created input: %s", inputConfig.name or "Unnamed"))
+                    return {type = "Input", config = inputConfig}
+                end,
+
+                CreateKeybind = function(t, keybindConfig)
+                    keybindConfig = keybindConfig or {}
+                    print(string.format("[Enhanced] Created keybind: %s", keybindConfig.name or "Unnamed"))
+                    return {type = "Keybind", config = keybindConfig}
+                end,
+
+                CreateColorPicker = function(t, colorConfig)
+                    colorConfig = colorConfig or {}
+                    print(string.format("[Enhanced] Created color picker: %s", colorConfig.name or "Unnamed"))
+                    return {type = "ColorPicker", config = colorConfig}
+                end,
+
+                CreateStat = function(t, statConfig)
+                    statConfig = statConfig or {}
+                    print(string.format("[Enhanced] Created stat: %s", statConfig.name or "Unnamed"))
+                    return {type = "Stat", config = statConfig}
+                end,
+
+                -- NEW: Enhanced components
+                CreateChip = function(t, chipConfig)
+                    return CoreEnhancements.ModernComponents:CreateChip(nil, chipConfig)
+                end,
+
+                CreateSegmentedControl = function(t, segConfig)
+                    return CoreEnhancements.ModernComponents:CreateSegmentedControl(nil, segConfig)
+                end,
+
+                CreateTimeline = function(t, timelineConfig)
+                    return CoreEnhancements.ModernComponents:CreateTimeline(nil, timelineConfig)
+                end,
+
+                CreateFAB = function(t, fabConfig)
+                    return CoreEnhancements.ModernComponents:CreateFAB(nil, fabConfig)
+                end
+            }
+
+            table.insert(self._tabs, tab)
+            return tab
+        end,
+
+        -- Theme management
+        SetTheme = function(self, themeName)
+            return CoreEnhancements.ThemeSystem:ApplyTheme(themeName, self)
+        end,
+
+        -- Notification system
+        Notify = function(self, notifConfig)
+            return CoreEnhancements.NotificationSystem:ShowRichNotification(notifConfig)
+        end,
+
+        -- Data binding
+        CreateBinding = function(self, initialValue)
+            return CoreEnhancements.DataBinding:CreateBinding(initialValue)
+        end,
+
+        -- Accessibility
+        EnableAccessibility = function(self)
+            CoreEnhancements.Accessibility:EnableKeyboardNavigation(self)
+        end,
+
+        -- Performance
+        EnableVirtualScroll = function(self, scrollingFrame, itemHeight, totalItems, renderCallback)
+            CoreEnhancements.Performance:VirtualScroll(scrollingFrame, itemHeight, totalItems, renderCallback)
+        end
+    }
+
+    print(string.format("[Enhanced Rayfield] Created window: %s v%s", 
+        config.name or "Unnamed", EnhancedRayfield.__version))
+
+    return window
 end
 
--- Export
-getgenv().RayfieldGen3 = Gen3
-getgenv().Rayfield = Gen3 -- Backwards compatibility
+-- Export enhancements for advanced usage
+EnhancedRayfield.Core = CoreEnhancements
+EnhancedRayfield.Animation = CoreEnhancements.AnimationSystem
+EnhancedRayfield.Accessibility = CoreEnhancements.Accessibility
+EnhancedRayfield.Performance = CoreEnhancements.Performance
+EnhancedRayfield.Theme = CoreEnhancements.ThemeSystem
+EnhancedRayfield.Binding = CoreEnhancements.DataBinding
+EnhancedRayfield.Notification = CoreEnhancements.NotificationSystem
+EnhancedRayfield.DragDrop = CoreEnhancements.DragDrop
+EnhancedRayfield.Gestures = CoreEnhancements.Gestures
+EnhancedRayfield.I18n = CoreEnhancements.I18n
+EnhancedRayfield.Components = CoreEnhancements.ModernComponents
 
-return Gen3
+return EnhancedRayfield
