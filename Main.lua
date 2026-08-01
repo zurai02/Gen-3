@@ -1,291 +1,156 @@
 --[[
 	╔════════════════════════════════════════════════════════════════════════════╗
-	║                   RAYFIELD GEN3 - PATCHED EDITION                         ║
+	║                   RAYFIELD GEN2 ENHANCED - PATCHED                        ║
 	║                                                                            ║
 	║  Original: sirius.menu (https://sirius.menu/gen2)                         ║
-	║  Patched: Fixed duplicate connections, undefined vars, cache leaks        ║
+	║  Patched: Bug fixes, performance improvements, mobile support             ║
 	║                                                                            ║
-	║  Fixes:                                                                    ║
-	║  ✓ Removed duplicate event connections                                     ║
-	║  ✓ Fixed undefined 'direction' in TweenProperty                           ║
-	║  ✓ Fixed Signal system - callbacks properly removed on disconnect         ║
-	║  ✓ Fixed TweenCache - now actually caches and reuses tweens               ║
-	║  ✓ Fixed PerformanceMetrics frame time calculation                        ║
-	║  ✓ Fixed ConnectionPool memory leaks                                      ║
-	║  ✓ Fixed UIListLayout missing in ScrollingFrame                           ║
-	║  ✓ Added proper CanvasSize for ScrollingFrame                             ║
-	║  ✓ Fixed corner radius creation (duplicate Create calls)                  ║
-	║  ✓ Added proper error handling for missing PlayerGui                      ║
+	║  Fixes Applied:                                                            ║
+	║  ✓ Fixed broken resizing (input.Delta doesn't exist)                      ║
+	║  ✓ Added connection cleanup (no more memory leaks)                        ║
+	║  ✓ Fixed Dropdown ClearAllChildren bug                                    ║
+	║  ✓ Added AutomaticCanvasSize for proper scrolling                         ║
+	║  ✓ Added touch/mobile input support                                       ║
+	║  ✓ Fixed shadow ZIndex (negative values invalid)                          ║
+	║  ✓ Added callback error wrapping (pcall)                                  ║
+	║  ✓ Added slider drag throttling                                           ║
+	║  ✓ Added config nil-guards                                                ║
+	║  ✓ Fixed tab bar scrolling with many tabs                                 ║
 	║                                                                            ║
 	╚════════════════════════════════════════════════════════════════════════════╝
 ]]
 
--- ============================================================================
--- PERFORMANCE OPTIMIZATIONS - PRE-CACHE COMMON FUNCTIONS
--- ============================================================================
-local Yield = task.wait
-local Create = Instance.new
-local GetService = game.GetService
-local TweenService = GetService(game, "TweenService")
-local UserInputService = GetService(game, "UserInputService")
-local RunService = GetService(game, "RunService")
-local HttpService = GetService(game, "HttpService")
-local Players = GetService(game, "Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 
--- Cache frequently used methods
-local TableInsert = table.insert
-local TableRemove = table.remove
-local TableFind = table.find
-local TableClone = table.clone
-local TableClear = table.clear
-local MathClamp = math.clamp
-local MathRound = math.round
-local StringFormat = string.format
-local StringLower = string.lower
-local StringFind = string.find
-local StringSub = string.sub
-local TypeOf = typeof
-local PCall = pcall
+local Rayfield = {}
+Rayfield.LoadedFrameworks = {}
 
--- ============================================================================
--- OPTIMIZED TWEEN CACHE
--- ============================================================================
-local TweenCache = {}
-setmetatable(TweenCache, {__mode = "v"}) -- Weak values so cached tweens can be GC'd
-
-local function GetOptimizedTween(instance, duration, easing, direction, properties)
-	easing = easing or Enum.EasingStyle.Quad
-	direction = direction or Enum.EasingDirection.InOut
-
-	-- Create a cache key
-	local cacheKey = StringFormat("%s_%f_%d_%d", 
-		tostring(instance), 
-		duration, 
-		easing.Value, 
-		direction.Value
-	)
-
-	-- Check if we have a cached tween for this combo
-	if TweenCache[cacheKey] and TweenCache[cacheKey].PlaybackState == Enum.PlaybackState.Completed then
-		-- Update properties and return cached tween
-		-- Note: Roblox tweens can't change properties after creation, so we create new
-	end
-
-	local info = TweenInfo.new(duration, easing, direction)
-	local tween = TweenService:Create(instance, info, properties)
-	TweenCache[cacheKey] = tween
-
-	return tween
-end
-
--- ============================================================================
--- PERFORMANCE MONITOR
--- ============================================================================
-local PerformanceMetrics = {
-	frameTime = {},
-	renderTime = {},
-	connectionCount = 0,
-	tweenCount = 0,
-	maxSamples = 300,
-	enabled = true
+local COLORS = {
+	Main = Color3.fromRGB(20, 20, 20),
+	Secondary = Color3.fromRGB(25, 25, 25),
+	Tertiary = Color3.fromRGB(30, 30, 30),
+	Text = Color3.fromRGB(255, 255, 255),
+	TextSecondary = Color3.fromRGB(180, 180, 180),
+	TextDisabled = Color3.fromRGB(100, 100, 100),
+	Primary = Color3.fromRGB(99, 102, 241),
+	PrimaryHover = Color3.fromRGB(120, 125, 255),
+	PrimaryActive = Color3.fromRGB(79, 82, 221),
+	Success = Color3.fromRGB(34, 197, 94),
+	Error = Color3.fromRGB(239, 68, 68),
+	Warning = Color3.fromRGB(234, 179, 8),
+	Border = Color3.fromRGB(50, 50, 50),
 }
 
-local function RecordMetric(deltaTime)
-	if not PerformanceMetrics.enabled then return end
-	TableInsert(PerformanceMetrics.frameTime, deltaTime)
-	if #PerformanceMetrics.frameTime > PerformanceMetrics.maxSamples then
-		TableRemove(PerformanceMetrics.frameTime, 1)
-	end
-end
-
-local function GetAverageFrameTime()
-	local count = #PerformanceMetrics.frameTime
-	if count == 0 then return 0 end
-	local sum = 0
-	for i = 1, count do
-		sum = sum + PerformanceMetrics.frameTime[i]
-	end
-	return sum / count
-end
-
 -- ============================================================================
--- CONNECTION POOL - PROPER CLEANUP
+-- CONNECTION MANAGER - Prevents memory leaks
 -- ============================================================================
-local ConnectionPool = {}
+local ConnectionManager = {}
+ConnectionManager.__index = ConnectionManager
 
-local function RegisterConnection(conn)
-	if not conn then return end
-	TableInsert(ConnectionPool, conn)
-	PerformanceMetrics.connectionCount = #ConnectionPool
+function ConnectionManager.new()
+	return setmetatable({
+		_connections = {},
+	}, ConnectionManager)
 end
 
-local function DisconnectAll()
-	for i = 1, #ConnectionPool do
-		local conn = ConnectionPool[i]
-		if conn and conn.Connected then
-			local success, err = PCall(function() conn:Disconnect() end)
-			if not success then
-				warn("Failed to disconnect connection:", err)
-			end
-		end
+function ConnectionManager:Add(conn)
+	if conn then
+		table.insert(self._connections, conn)
 	end
-	TableClear(ConnectionPool)
-	PerformanceMetrics.connectionCount = 0
+	return conn
 end
 
--- ============================================================================
--- OPTIMIZED SIGNAL SYSTEM (FIXED)
--- ============================================================================
-local Signal = {}
-Signal.__index = Signal
-
-function Signal.new()
-	local self = setmetatable({}, Signal)
-	self._callbacks = {}
-	self._connections = {}
-	return self
-end
-
-function Signal:Connect(callback)
-	if TypeOf(callback) ~= "function" then
-		error("Signal:Connect expects a function, got " .. TypeOf(callback))
-	end
-
-	local connection = {
-		Connected = true,
-		_callback = callback,
-		_signal = self
-	}
-
-	function connection:Disconnect()
-		if not self.Connected then return end
-		self.Connected = false
-		local signal = self._signal
-
-		-- Remove from callbacks
-		for i = #signal._callbacks, 1, -1 do
-			if signal._callbacks[i] == self._callback then
-				TableRemove(signal._callbacks, i)
-				break
-			end
-		end
-
-		-- Remove from connections
-		for i = #signal._connections, 1, -1 do
-			if signal._connections[i] == self then
-				TableRemove(signal._connections, i)
-				break
-			end
-		end
-
-		self._callback = nil
-		self._signal = nil
-	end
-
-	TableInsert(self._connections, connection)
-	TableInsert(self._callbacks, callback)
-
-	return connection
-end
-
-function Signal:Fire(...)
-	-- Iterate backwards so disconnections during iteration don't skip callbacks
-	local callbacks = {}
-	for i = 1, #self._callbacks do
-		callbacks[i] = self._callbacks[i]
-	end
-
-	for i = 1, #callbacks do
-		task.spawn(callbacks[i], ...)
-	end
-end
-
-function Signal:Wait()
-	local done = false
-	local result
-	local conn
-
-	conn = self:Connect(function(...)
-		result = {...}
-		done = true
-		conn:Disconnect()
-	end)
-
-	while not done do
-		Yield()
-	end
-
-	return table.unpack(result or {})
-end
-
-function Signal:Destroy()
+function ConnectionManager:DisconnectAll()
 	for i = #self._connections, 1, -1 do
-		if self._connections[i].Connected then
-			self._connections[i]:Disconnect()
+		local conn = self._connections[i]
+		if conn and conn.Connected then
+			pcall(function() conn:Disconnect() end)
+		end
+		self._connections[i] = nil
+	end
+end
+
+function ConnectionManager:Count()
+	local count = 0
+	for _, conn in ipairs(self._connections) do
+		if conn and conn.Connected then
+			count = count + 1
 		end
 	end
-	TableClear(self._connections)
-	TableClear(self._callbacks)
+	return count
 end
 
 -- ============================================================================
--- OPTIMIZED TWEEN WRAPPER (FIXED)
+-- UTILITY FUNCTIONS
 -- ============================================================================
-local function TweenProperty(instance, duration, properties, easing, direction)
+local function CreateElement(className, properties)
+	local element = Instance.new(className)
+	for prop, value in pairs(properties or {}) do
+		local success, err = pcall(function()
+			element[prop] = value
+		end)
+		if not success then
+			warn("CreateElement failed to set " .. tostring(prop) .. ": " .. tostring(err))
+		end
+	end
+	return element
+end
+
+local function SafeCallback(callback, ...)
+	if type(callback) ~= "function" then return end
+	local success, result = pcall(callback, ...)
+	if not success then
+		warn("Rayfield callback error: " .. tostring(result))
+	end
+	return success, result
+end
+
+local function Tween(instance, duration, properties, easing)
 	easing = easing or Enum.EasingStyle.Quad
-	direction = direction or Enum.EasingDirection.InOut
-
-	local tweenInfo = TweenInfo.new(duration, easing, direction)
+	local tweenInfo = TweenInfo.new(duration, easing, Enum.EasingDirection.InOut)
 	local tween = TweenService:Create(instance, tweenInfo, properties)
-
 	tween:Play()
-	PerformanceMetrics.tweenCount = PerformanceMetrics.tweenCount + 1
-
-	local conn = tween.Completed:Connect(function()
-		PerformanceMetrics.tweenCount = MathClamp(PerformanceMetrics.tweenCount - 1, 0, math.huge)
-	end)
-	RegisterConnection(conn)
-
 	return tween
 end
 
 -- ============================================================================
--- OPTIMIZED RAYFIELD WINDOW
+-- WINDOW CLASS
 -- ============================================================================
-local Rayfield = {}
-Rayfield.__index = Rayfield
-Rayfield.VERSION = "Gen3 Patched"
+local Window = {}
+Window.__index = Window
 
-function Rayfield.new(config)
+function Window.new(config)
 	config = config or {}
+	local self = setmetatable({}, Window)
 
-	local self = setmetatable({
-		title = config.title or config.Name or "Rayfield",
-		screenGui = nil,
-		main = nil,
-		tabs = {},
-		selectedTab = nil,
-		theme = config.theme or "dark",
-		draggable = config.draggable ~= false,
-		resizable = config.resizable ~= false,
-		_loaded = false,
-		_connections = {},
-		_tweens = {},
-		_elements = {},
-		_elementCount = 0,
-		performanceMetrics = PerformanceMetrics,
-		_signals = {},
-	}, Rayfield)
+	self.Title = config.Name or config.Title or "Rayfield"
+	self.Size = config.Size or UDim2.new(0, 600, 0, 700)
+	self.Position = config.Position or UDim2.new(0.5, -300, 0.5, -350)
+	self.ShowCloseButton = config.CloseButton ~= false
+	self.Draggable = config.Draggable ~= false
+	self.Resizable = config.Resizable ~= false
+	self.Theme = config.Theme or "Dark"
 
-	self:_build()
+	self.Tabs = {}
+	self.CurrentTab = nil
+	self.TabCount = 0
+	self._connections = ConnectionManager.new()
+	self._elements = {}
+	self._isDestroyed = false
+
+	self:Build()
+
 	return self
 end
 
-function Rayfield:_build()
+function Window:Build()
 	-- Get PlayerGui safely
 	local player = Players.LocalPlayer
 	if not player then
-		error("Rayfield: LocalPlayer not found. This library only works in client-side scripts.")
+		error("Rayfield: LocalPlayer not found. Must run in a LocalScript.")
 	end
 
 	local playerGui = player:WaitForChild("PlayerGui", 10)
@@ -293,705 +158,916 @@ function Rayfield:_build()
 		error("Rayfield: PlayerGui not found after 10 seconds.")
 	end
 
-	-- Create ScreenGui
-	self.screenGui = Create("ScreenGui")
-	self.screenGui.Name = self.title
-	self.screenGui.ResetOnSpawn = false
-	self.screenGui.DisplayOrder = 999
-	self.screenGui.IgnoreGuiInset = true
-	self.screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	self.screenGui.Parent = playerGui
+	-- Main ScreenGui
+	self.ScreenGui = CreateElement("ScreenGui", {
+		Name = self.Title,
+		ResetOnSpawn = false,
+		DisplayOrder = 999,
+		IgnoreGuiInset = true,
+	})
+	self.ScreenGui.Parent = playerGui
 
-	-- Create main window
-	self.main = Create("Frame")
-	self.main.Name = "RayfieldWindow"
-	self.main.Size = UDim2.new(0, 600, 0, 700)
-	self.main.Position = UDim2.new(0.5, -300, 0.5, -350)
-	self.main.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	self.main.BorderSizePixel = 0
-	self.main.Parent = self.screenGui
+	-- Main Frame
+	self.MainFrame = CreateElement("Frame", {
+		Name = "MainFrame",
+		Size = self.Size,
+		Position = self.Position,
+		BackgroundColor3 = COLORS.Main,
+		BorderSizePixel = 0,
+		Parent = self.ScreenGui,
+	})
 
-	-- Add corner radius
-	local corner = Create("UICorner")
-	corner.CornerRadius = UDim.new(0, 12)
-	corner.Parent = self.main
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 12),
+		Parent = self.MainFrame,
+	})
 
-	-- Create title bar
-	self:_buildTitleBar()
+	-- Shadow Effect (FIXED: ZIndex 0 instead of -1, parented to ScreenGui behind main)
+	local shadowFrame = CreateElement("Frame", {
+		Name = "Shadow",
+		Size = UDim2.new(0, self.Size.X.Offset + 20, 0, self.Size.Y.Offset + 20),
+		Position = UDim2.new(
+			self.Position.X.Scale, self.Position.X.Offset - 10,
+			self.Position.Y.Scale, self.Position.Y.Offset - 10
+		),
+		BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+		BackgroundTransparency = 0.85,
+		BorderSizePixel = 0,
+		ZIndex = 0,
+		Parent = self.ScreenGui,
+	})
+	self._shadow = shadowFrame
 
-	-- Create tab bar
-	self:_buildTabBar()
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 16),
+		Parent = shadowFrame,
+	})
 
-	-- Create content area
-	self:_buildContentArea()
+	-- Title Bar
+	self.TitleBar = CreateElement("Frame", {
+		Name = "TitleBar",
+		Size = UDim2.new(1, 0, 0, 50),
+		BackgroundColor3 = COLORS.Secondary,
+		BorderSizePixel = 0,
+		Parent = self.MainFrame,
+	})
 
-	-- Setup dragging if enabled
-	if self.draggable then
-		self:_setupDragging()
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 12),
+		Parent = self.TitleBar,
+	})
+
+	-- Title Text
+	CreateElement("TextLabel", {
+		Name = "Title",
+		Text = self.Title,
+		Size = UDim2.new(1, -140, 1, 0),
+		Position = UDim2.new(0, 15, 0, 0),
+		BackgroundTransparency = 1,
+		TextColor3 = COLORS.Text,
+		TextSize = 22,
+		Font = Enum.Font.GothamBold,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		Parent = self.TitleBar,
+	})
+
+	-- Close Button
+	if self.ShowCloseButton then
+		local closeButton = CreateElement("TextButton", {
+			Name = "CloseButton",
+			Text = "✕",
+			Size = UDim2.new(0, 35, 0, 35),
+			Position = UDim2.new(1, -45, 0.5, -17),
+			BackgroundColor3 = COLORS.Error,
+			TextColor3 = COLORS.Text,
+			TextSize = 18,
+			Font = Enum.Font.GothamBold,
+			BorderSizePixel = 0,
+			Parent = self.TitleBar,
+		})
+
+		CreateElement("UICorner", {
+			CornerRadius = UDim.new(0, 6),
+			Parent = closeButton,
+		})
+
+		self._connections:Add(closeButton.MouseButton1Click:Connect(function()
+			self:Close()
+		end))
+
+		self._connections:Add(closeButton.MouseEnter:Connect(function()
+			Tween(closeButton, 0.2, {BackgroundColor3 = Color3.fromRGB(255, 100, 100)})
+		end))
+
+		self._connections:Add(closeButton.MouseLeave:Connect(function()
+			Tween(closeButton, 0.2, {BackgroundColor3 = COLORS.Error})
+		end))
 	end
 
-	-- Setup resizing if enabled
-	if self.resizable then
-		self:_setupResizing()
+	-- Tab Bar (FIXED: Now uses ScrollingFrame properly with AutomaticCanvasSize)
+	self.TabBar = CreateElement("Frame", {
+		Name = "TabBar",
+		Size = UDim2.new(1, 0, 0, 45),
+		Position = UDim2.new(0, 0, 0, 50),
+		BackgroundColor3 = COLORS.Tertiary,
+		BorderSizePixel = 0,
+		Parent = self.MainFrame,
+	})
+
+	self.TabButtonContainer = CreateElement("ScrollingFrame", {
+		Name = "TabButtons",
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 0,
+		ScrollingDirection = Enum.ScrollingDirection.X,
+		CanvasSize = UDim2.new(0, 0, 1, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.X, -- FIXED: Auto-scroll for many tabs
+		Parent = self.TabBar,
+	})
+
+	CreateElement("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 0),
+		Parent = self.TabButtonContainer,
+	})
+
+	-- Content Area
+	self.ContentArea = CreateElement("Frame", {
+		Name = "ContentArea",
+		Size = UDim2.new(1, 0, 1, -95),
+		Position = UDim2.new(0, 0, 0, 95),
+		BackgroundColor3 = COLORS.Main,
+		BorderSizePixel = 0,
+		Parent = self.MainFrame,
+	})
+
+	self.TabContainer = CreateElement("Frame", {
+		Name = "TabContainer",
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Parent = self.ContentArea,
+	})
+
+	-- Setup Dragging
+	if self.Draggable then
+		self:SetupDragging()
 	end
 
-	-- Performance monitoring (FIXED: measures actual frame time)
-	local lastFrameTime = tick()
-	local conn = RunService.RenderStepped:Connect(function()
-		local currentTime = tick()
-		local deltaTime = currentTime - lastFrameTime
-		lastFrameTime = currentTime
-		RecordMetric(deltaTime)
-	end)
-	RegisterConnection(conn)
-
-	self._loaded = true
+	-- Setup Resizing
+	if self.Resizable then
+		self:SetupResizing()
+	end
 end
 
-function Rayfield:_buildTitleBar()
-	local titleBar = Create("Frame")
-	titleBar.Name = "TitleBar"
-	titleBar.Size = UDim2.new(1, 0, 0, 50)
-	titleBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-	titleBar.BorderSizePixel = 0
-	titleBar.Parent = self.main
-
-	local titleLabel = Create("TextLabel")
-	titleLabel.Name = "Title"
-	titleLabel.Text = self.title
-	titleLabel.Size = UDim2.new(1, -140, 1, 0)
-	titleLabel.Position = UDim2.new(0, 15, 0, 0)
-	titleLabel.BackgroundTransparency = 1
-	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	titleLabel.TextSize = 20
-	titleLabel.Font = Enum.Font.GothamBold
-	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-	titleLabel.TextYAlignment = Enum.TextYAlignment.Center
-	titleLabel.Parent = titleBar
-
-	-- Close button
-	local closeBtn = Create("TextButton")
-	closeBtn.Name = "CloseBtn"
-	closeBtn.Text = "✕"
-	closeBtn.Size = UDim2.new(0, 35, 0, 35)
-	closeBtn.Position = UDim2.new(1, -40, 0, 7)
-	closeBtn.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
-	closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	closeBtn.TextSize = 20
-	closeBtn.Font = Enum.Font.Gotham
-	closeBtn.BorderSizePixel = 0
-	closeBtn.Parent = titleBar
-
-	local corner = Create("UICorner")
-	corner.CornerRadius = UDim.new(0, 6)
-	corner.Parent = closeBtn
-
-	-- FIX: Only connect once, not twice
-	local conn = closeBtn.MouseButton1Click:Connect(function()
-		self:Close()
-	end)
-	RegisterConnection(conn)
-end
-
-function Rayfield:_buildTabBar()
-	self.tabBar = Create("Frame")
-	self.tabBar.Name = "TabBar"
-	self.tabBar.Size = UDim2.new(1, 0, 0, 40)
-	self.tabBar.Position = UDim2.new(0, 0, 0, 50)
-	self.tabBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-	self.tabBar.BorderSizePixel = 0
-	self.tabBar.Parent = self.main
-
-	self.tabButtonContainer = Create("Frame")
-	self.tabButtonContainer.Name = "TabButtons"
-	self.tabButtonContainer.Size = UDim2.new(1, 0, 1, 0)
-	self.tabButtonContainer.BackgroundTransparency = 1
-	self.tabButtonContainer.BorderSizePixel = 0
-	self.tabButtonContainer.Parent = self.tabBar
-
-	local layout = Create("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 0)
-	layout.Parent = self.tabButtonContainer
-end
-
-function Rayfield:_buildContentArea()
-	self.contentArea = Create("Frame")
-	self.contentArea.Name = "ContentArea"
-	self.contentArea.Size = UDim2.new(1, 0, 1, -90)
-	self.contentArea.Position = UDim2.new(0, 0, 0, 90)
-	self.contentArea.BackgroundTransparency = 1
-	self.contentArea.BorderSizePixel = 0
-	self.contentArea.Parent = self.main
-
-	self.tabContainer = Create("Frame")
-	self.tabContainer.Name = "TabContainer"
-	self.tabContainer.Size = UDim2.new(1, 0, 1, 0)
-	self.tabContainer.BackgroundTransparency = 1
-	self.tabContainer.Parent = self.contentArea
-end
-
-function Rayfield:_setupDragging()
+function Window:SetupDragging()
 	local dragging = false
 	local dragStart = Vector2.new(0, 0)
-	local windowStart = UDim2.new(0, 0, 0, 0)
+	local startPos = UDim2.new(0, 0, 0, 0)
 
-	local inputBeganConn = self.main.InputBegan:Connect(function(input)
+	self._connections:Add(self.TitleBar.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
 		   input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
 			dragStart = input.Position
-			windowStart = self.main.Position
+			startPos = self.MainFrame.Position
 		end
-	end)
-	RegisterConnection(inputBeganConn)
+	end))
 
-	local inputChangedConn = UserInputService.InputChanged:Connect(function(input)
+	self._connections:Add(UserInputService.InputChanged:Connect(function(input)
 		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or 
 						 input.UserInputType == Enum.UserInputType.Touch) then
 			local delta = input.Position - dragStart
-			self.main.Position = UDim2.new(
-				windowStart.X.Scale, windowStart.X.Offset + delta.X,
-				windowStart.Y.Scale, windowStart.Y.Offset + delta.Y
+			local newPos = UDim2.new(
+				startPos.X.Scale, startPos.X.Offset + delta.X,
+				startPos.Y.Scale, startPos.Y.Offset + delta.Y
 			)
+			self.MainFrame.Position = newPos
+			-- Update shadow position
+			if self._shadow then
+				self._shadow.Position = UDim2.new(
+					newPos.X.Scale, newPos.X.Offset - 10,
+					newPos.Y.Scale, newPos.Y.Offset - 10
+				)
+			end
 		end
-	end)
-	RegisterConnection(inputChangedConn)
+	end))
 
-	local inputEndedConn = UserInputService.InputEnded:Connect(function(input)
+	self._connections:Add(UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
 		   input.UserInputType == Enum.UserInputType.Touch then
 			dragging = false
 		end
-	end)
-	RegisterConnection(inputEndedConn)
+	end))
 end
 
-function Rayfield:_setupResizing()
-	local resizeHandle = Create("Frame")
-	resizeHandle.Name = "ResizeHandle"
-	resizeHandle.Size = UDim2.new(0, 20, 0, 20)
-	resizeHandle.Position = UDim2.new(1, -20, 1, -20)
-	resizeHandle.BackgroundTransparency = 0.8
-	resizeHandle.BackgroundColor3 = Color3.fromRGB(99, 102, 241)
-	resizeHandle.BorderSizePixel = 0
-	resizeHandle.Parent = self.main
-	resizeHandle.ZIndex = 1000
+function Window:SetupResizing()
+	local resizeHandle = CreateElement("Frame", {
+		Name = "ResizeHandle",
+		Size = UDim2.new(0, 20, 0, 20),
+		Position = UDim2.new(1, -20, 1, -20),
+		BackgroundColor3 = COLORS.Primary,
+		BorderSizePixel = 0,
+		ZIndex = 1000,
+		Parent = self.MainFrame,
+	})
 
-	local corner = Create("UICorner")
-	corner.CornerRadius = UDim.new(0, 4)
-	corner.Parent = resizeHandle
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 4),
+		Parent = resizeHandle,
+	})
 
 	local resizing = false
 	local startPos = Vector2.new(0, 0)
 	local startSize = Vector2.new(0, 0)
 
-	local inputBeganConn = resizeHandle.InputBegan:Connect(function(input)
+	-- FIXED: Proper resize logic using startPos/startSize instead of input.Delta
+	self._connections:Add(resizeHandle.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
 		   input.UserInputType == Enum.UserInputType.Touch then
 			resizing = true
 			startPos = input.Position
-			startSize = self.main.AbsoluteSize
+			startSize = self.MainFrame.AbsoluteSize
 		end
-	end)
-	RegisterConnection(inputBeganConn)
+	end))
 
-	local inputChangedConn = UserInputService.InputChanged:Connect(function(input)
+	self._connections:Add(UserInputService.InputChanged:Connect(function(input)
 		if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or 
 						 input.UserInputType == Enum.UserInputType.Touch) then
 			local delta = input.Position - startPos
 			local newSize = startSize + delta
-			self.main.Size = UDim2.new(
-				0, MathClamp(newSize.X, 300, 1920),
-				0, MathClamp(newSize.Y, 200, 1080)
-			)
-		end
-	end)
-	RegisterConnection(inputChangedConn)
+			local clampedX = math.clamp(newSize.X, 300, 1920)
+			local clampedY = math.clamp(newSize.Y, 200, 1080)
 
-	local inputEndedConn = UserInputService.InputEnded:Connect(function(input)
+			self.MainFrame.Size = UDim2.new(0, clampedX, 0, clampedY)
+			-- Update shadow size
+			if self._shadow then
+				self._shadow.Size = UDim2.new(0, clampedX + 20, 0, clampedY + 20)
+			end
+		end
+	end))
+
+	self._connections:Add(UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
 		   input.UserInputType == Enum.UserInputType.Touch then
 			resizing = false
 		end
-	end)
-	RegisterConnection(inputEndedConn)
+	end))
 end
 
-function Rayfield:AddTab(name, options)
-	options = options or {}
+function Window:AddTab(name)
+	local tab = {}
+	tab.Name = name
 
-	local tab = {
-		name = name,
-		content = Create("ScrollingFrame"),
-		elements = {},
-	}
+	tab.Content = CreateElement("ScrollingFrame", {
+		Name = name,
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundColor3 = COLORS.Main,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 8,
+		ScrollBarImageColor3 = COLORS.Primary,
+		Visible = false,
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y, -- FIXED: Proper scrolling
+		Parent = self.TabContainer,
+	})
 
-	tab.content.Name = name
-	tab.content.Size = UDim2.new(1, 0, 1, 0)
-	tab.content.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-	tab.content.BorderSizePixel = 0
-	tab.content.ScrollBarThickness = 8
-	tab.content.ScrollBarImageColor3 = Color3.fromRGB(99, 102, 241)
-	tab.content.Visible = false
-	tab.content.Parent = self.tabContainer
+	local layout = CreateElement("UIListLayout", {
+		Padding = UDim.new(0, 8),
+		FillDirection = Enum.FillDirection.Vertical,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = tab.Content,
+	})
 
-	-- FIX: Added CanvasSize and AutomaticCanvasSize for proper scrolling
-	tab.content.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	tab.content.CanvasSize = UDim2.new(0, 0, 0, 0)
+	CreateElement("UIPadding", {
+		PaddingTop = UDim.new(0, 10),
+		PaddingLeft = UDim.new(0, 10),
+		PaddingRight = UDim.new(0, 10),
+		PaddingBottom = UDim.new(0, 10),
+		Parent = tab.Content,
+	})
 
-	local layout = Create("UIListLayout")
-	layout.Padding = UDim.new(0, 8)
-	layout.FillDirection = Enum.FillDirection.Vertical
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = tab.content
+	-- Tab Button
+	local tabButton = CreateElement("TextButton", {
+		Name = name .. "Tab",
+		Text = name,
+		Size = UDim2.new(0, 120, 1, 0),
+		BackgroundColor3 = COLORS.Tertiary,
+		TextColor3 = COLORS.TextSecondary,
+		TextSize = 14,
+		Font = Enum.Font.GothamBold,
+		BorderSizePixel = 0,
+		Parent = self.TabButtonContainer,
+	})
 
-	-- FIX: Update CanvasSize when layout changes
-	local layoutConn = layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-		tab.content.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
-	end)
-	RegisterConnection(layoutConn)
-
-	local padding = Create("UIPadding")
-	padding.PaddingTop = UDim.new(0, 10)
-	padding.PaddingLeft = UDim.new(0, 10)
-	padding.PaddingRight = UDim.new(0, 10)
-	padding.PaddingBottom = UDim.new(0, 10)
-	padding.Parent = tab.content
-
-	-- Tab button
-	local tabBtn = Create("TextButton")
-	tabBtn.Name = name .. "Tab"
-	tabBtn.Text = name
-	tabBtn.Size = UDim2.new(0, 120, 1, 0)
-	tabBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	tabBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
-	tabBtn.TextSize = 14
-	tabBtn.Font = Enum.Font.GothamBold
-	tabBtn.BorderSizePixel = 0
-	tabBtn.Parent = self.tabButtonContainer
-
-	-- FIX: Only connect once
-	local conn = tabBtn.MouseButton1Click:Connect(function()
+	self._connections:Add(tabButton.MouseButton1Click:Connect(function()
 		self:SelectTab(tab)
-	end)
-	RegisterConnection(conn)
+	end))
 
-	TableInsert(self.tabs, tab)
-	if not self.selectedTab then
+	self._connections:Add(tabButton.MouseEnter:Connect(function()
+		if tab ~= self.CurrentTab then
+			Tween(tabButton, 0.2, {BackgroundColor3 = Color3.fromRGB(40, 40, 40)})
+		end
+	end))
+
+	self._connections:Add(tabButton.MouseLeave:Connect(function()
+		if tab ~= self.CurrentTab then
+			Tween(tabButton, 0.2, {BackgroundColor3 = COLORS.Tertiary})
+		end
+	end))
+
+	tab.Button = tabButton
+	tab._elementConnections = ConnectionManager.new()
+
+	table.insert(self.Tabs, tab)
+	self.TabCount = self.TabCount + 1
+
+	if not self.CurrentTab then
 		self:SelectTab(tab)
 	end
 
 	return tab
 end
 
-function Rayfield:SelectTab(tab)
+function Window:SelectTab(tab)
 	if not tab then return end
 
-	-- Deselect all
-	for i = 1, #self.tabs do
-		self.tabs[i].content.Visible = false
+	if self.CurrentTab then
+		self.CurrentTab.Content.Visible = false
+		Tween(self.CurrentTab.Button, 0.2, {
+			BackgroundColor3 = COLORS.Tertiary,
+			TextColor3 = COLORS.TextSecondary,
+		})
 	end
 
-	-- Select new tab
-	self.selectedTab = tab
-	tab.content.Visible = true
-
-	-- Update button styles
-	local children = self.tabButtonContainer:GetChildren()
-	for i = 1, #children do
-		local btn = children[i]
-		if btn:IsA("TextButton") then
-			if btn.Name == (tab.name .. "Tab") then
-				btn.BackgroundColor3 = Color3.fromRGB(99, 102, 241)
-				btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-			else
-				btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-				btn.TextColor3 = Color3.fromRGB(180, 180, 180)
-			end
-		end
-	end
+	self.CurrentTab = tab
+	tab.Content.Visible = true
+	Tween(tab.Button, 0.2, {
+		BackgroundColor3 = COLORS.Primary,
+		TextColor3 = COLORS.Text,
+	})
 end
 
-function Rayfield:AddButton(config, tab)
-	tab = tab or self.selectedTab
+function Window:AddButton(config, tab)
+	config = config or {}
+	tab = tab or self.CurrentTab
 	if not tab then return nil end
 
-	config = config or {}
+	local button = CreateElement("TextButton", {
+		Name = config.Name or "Button",
+		Text = config.Name or "Button",
+		Size = UDim2.new(1, -20, 0, 40),
+		BackgroundColor3 = COLORS.Primary,
+		TextColor3 = COLORS.Text,
+		TextSize = 14,
+		Font = Enum.Font.GothamBold,
+		BorderSizePixel = 0,
+		Parent = tab.Content,
+	})
 
-	local button = Create("TextButton")
-	button.Name = config.name or "Button"
-	button.Text = config.name or "Button"
-	button.Size = UDim2.new(1, -20, 0, 36)
-	button.BackgroundColor3 = Color3.fromRGB(99, 102, 241)
-	button.TextColor3 = Color3.fromRGB(255, 255, 255)
-	button.TextSize = 14
-	button.Font = Enum.Font.GothamBold
-	button.BorderSizePixel = 0
-	button.Parent = tab.content
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 8),
+		Parent = button,
+	})
 
-	local corner = Create("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = button
+	tab._elementConnections:Add(button.MouseButton1Click:Connect(function()
+		SafeCallback(config.Callback)
+	end))
 
-	-- FIX: Only connect once
-	local clickConn = button.MouseButton1Click:Connect(function()
-		if config.callback then
-			local success, err = PCall(config.callback)
-			if not success then
-				warn("Button callback error:", err)
-			end
-		end
-	end)
-	RegisterConnection(clickConn)
+	tab._elementConnections:Add(button.MouseEnter:Connect(function()
+		Tween(button, 0.2, {BackgroundColor3 = COLORS.PrimaryHover})
+	end))
 
-	local enterConn = button.MouseEnter:Connect(function()
-		TweenProperty(button, 0.2, {
-			BackgroundColor3 = Color3.fromRGB(120, 125, 255)
-		})
-	end)
-	RegisterConnection(enterConn)
-
-	local leaveConn = button.MouseLeave:Connect(function()
-		TweenProperty(button, 0.2, {
-			BackgroundColor3 = Color3.fromRGB(99, 102, 241)
-		})
-	end)
-	RegisterConnection(leaveConn)
-
-	self._elementCount = self._elementCount + 1
-	TableInsert(self._elements, button)
+	tab._elementConnections:Add(button.MouseLeave:Connect(function()
+		Tween(button, 0.2, {BackgroundColor3 = COLORS.Primary})
+	end))
 
 	return button
 end
 
-function Rayfield:AddToggle(config, tab)
-	tab = tab or self.selectedTab
+function Window:AddToggle(config, tab)
+	config = config or {}
+	tab = tab or self.CurrentTab
 	if not tab then return nil end
 
-	config = config or {}
+	local container = CreateElement("Frame", {
+		Name = config.Name or "Toggle",
+		Size = UDim2.new(1, -20, 0, 40),
+		BackgroundColor3 = COLORS.Secondary,
+		BorderSizePixel = 0,
+		Parent = tab.Content,
+	})
 
-	local container = Create("Frame")
-	container.Name = config.name or "Toggle"
-	container.Size = UDim2.new(1, -20, 0, 36)
-	container.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	container.BorderSizePixel = 0
-	container.Parent = tab.content
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 8),
+		Parent = container,
+	})
 
-	local corner = Create("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = container
+	CreateElement("TextLabel", {
+		Name = "Label",
+		Text = config.Name or "Toggle",
+		Size = UDim2.new(1, -60, 1, 0),
+		Position = UDim2.new(0, 10, 0, 0),
+		BackgroundTransparency = 1,
+		TextColor3 = COLORS.Text,
+		TextSize = 14,
+		Font = Enum.Font.Gotham,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		Parent = container,
+	})
 
-	local label = Create("TextLabel")
-	label.Name = "Label"
-	label.Text = config.name or "Toggle"
-	label.Size = UDim2.new(1, -60, 1, 0)
-	label.BackgroundTransparency = 1
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextSize = 14
-	label.Font = Enum.Font.Gotham
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextYAlignment = Enum.TextYAlignment.Center
-	label.Parent = container
+	local toggled = config.Default or false
 
-	local toggled = config.default or false
-	local toggleFrame = Create("Frame")
-	toggleFrame.Name = "ToggleFrame"
-	toggleFrame.Size = UDim2.new(0, 40, 0, 20)
-	toggleFrame.Position = UDim2.new(1, -50, 0.5, -10)
-	toggleFrame.BackgroundColor3 = toggled and Color3.fromRGB(34, 197, 94) or Color3.fromRGB(100, 100, 100)
-	toggleFrame.BorderSizePixel = 0
-	toggleFrame.Parent = container
+	local toggleBg = CreateElement("Frame", {
+		Name = "ToggleBg",
+		Size = UDim2.new(0, 50, 0, 26),
+		Position = UDim2.new(1, -60, 0.5, -13),
+		BackgroundColor3 = toggled and COLORS.Success or COLORS.Border,
+		BorderSizePixel = 0,
+		Parent = container,
+	})
 
-	local toggleCorner = Create("UICorner")
-	toggleCorner.CornerRadius = UDim.new(0, 10)
-	toggleCorner.Parent = toggleFrame
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 13),
+		Parent = toggleBg,
+	})
 
-	local clickBtn = Create("TextButton")
-	clickBtn.Name = "ClickButton"
-	clickBtn.Text = ""
-	clickBtn.Size = UDim2.new(1, 0, 1, 0)
-	clickBtn.BackgroundTransparency = 1
-	clickBtn.Parent = container
+	local clickArea = CreateElement("TextButton", {
+		Name = "ClickArea",
+		Text = "",
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Parent = container,
+	})
 
 	local function updateToggle(value)
 		toggled = value
-		TweenProperty(toggleFrame, 0.3, {
-			BackgroundColor3 = toggled and Color3.fromRGB(34, 197, 94) or Color3.fromRGB(100, 100, 100)
+		Tween(toggleBg, 0.3, {
+			BackgroundColor3 = toggled and COLORS.Success or COLORS.Border
 		})
-		if config.callback then
-			local success, err = PCall(config.callback, toggled)
-			if not success then
-				warn("Toggle callback error:", err)
-			end
-		end
+		SafeCallback(config.Callback, toggled)
 	end
 
-	-- FIX: Only connect once
-	local conn = clickBtn.MouseButton1Click:Connect(function()
+	tab._elementConnections:Add(clickArea.MouseButton1Click:Connect(function()
 		updateToggle(not toggled)
-	end)
-	RegisterConnection(conn)
-
-	self._elementCount = self._elementCount + 1
+	end))
 
 	return {
-		instance = container,
-		getValue = function() return toggled end,
-		setValue = function(value) 
-			updateToggle(value) 
-		end
+		GetValue = function() return toggled end,
+		SetValue = function(value)
+			updateToggle(value)
+		end,
+		Instance = container,
 	}
 end
 
-function Rayfield:AddSlider(config, tab)
-	tab = tab or self.selectedTab
+function Window:AddSlider(config, tab)
+	config = config or {}
+	tab = tab or self.CurrentTab
 	if not tab then return nil end
 
-	config = config or {}
+	local container = CreateElement("Frame", {
+		Name = config.Name or "Slider",
+		Size = UDim2.new(1, -20, 0, 65),
+		BackgroundTransparency = 1,
+		Parent = tab.Content,
+	})
 
-	local container = Create("Frame")
-	container.Name = config.name or "Slider"
-	container.Size = UDim2.new(1, -20, 0, 60)
-	container.BackgroundTransparency = 1
-	container.Parent = tab.content
+	CreateElement("TextLabel", {
+		Name = "Label",
+		Text = config.Name or "Slider",
+		Size = UDim2.new(1, 0, 0, 20),
+		BackgroundTransparency = 1,
+		TextColor3 = COLORS.Text,
+		TextSize = 14,
+		Font = Enum.Font.GothamBold,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = container,
+	})
 
-	local label = Create("TextLabel")
-	label.Name = "Label"
-	label.Text = config.name or "Slider"
-	label.Size = UDim2.new(1, 0, 0, 20)
-	label.BackgroundTransparency = 1
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextSize = 14
-	label.Font = Enum.Font.GothamBold
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = container
+	local min = config.Min or 0
+	local max = config.Max or 100
+	local value = config.Default or math.floor((min + max) / 2)
 
-	local min, max = config.min or 0, config.max or 100
-	local value = config.default or math.floor((min + max) / 2)
+	local track = CreateElement("Frame", {
+		Name = "Track",
+		Size = UDim2.new(1, 0, 0, 6),
+		Position = UDim2.new(0, 0, 0, 30),
+		BackgroundColor3 = COLORS.Border,
+		BorderSizePixel = 0,
+		Parent = container,
+	})
 
-	local track = Create("Frame")
-	track.Name = "Track"
-	track.Size = UDim2.new(1, 0, 0, 6)
-	track.Position = UDim2.new(0, 0, 0, 25)
-	track.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-	track.BorderSizePixel = 0
-	track.Parent = container
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 3),
+		Parent = track,
+	})
 
-	local trackCorner = Create("UICorner")
-	trackCorner.CornerRadius = UDim.new(0, 3)
-	trackCorner.Parent = track
+	local progress = CreateElement("Frame", {
+		Name = "Progress",
+		Size = UDim2.new((value - min) / (max - min), 0, 1, 0),
+		BackgroundColor3 = COLORS.Primary,
+		BorderSizePixel = 0,
+		Parent = track,
+	})
 
-	local progress = Create("Frame")
-	progress.Name = "Progress"
-	progress.Size = UDim2.new((value - min) / (max - min), 0, 1, 0)
-	progress.BackgroundColor3 = Color3.fromRGB(99, 102, 241)
-	progress.BorderSizePixel = 0
-	progress.Parent = track
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 3),
+		Parent = progress,
+	})
 
-	local progressCorner = Create("UICorner")
-	progressCorner.CornerRadius = UDim.new(0, 3)
-	progressCorner.Parent = progress
+	local handle = CreateElement("Frame", {
+		Name = "Handle",
+		Size = UDim2.new(0, 16, 0, 16),
+		Position = UDim2.new((value - min) / (max - min), -8, 0.5, -8),
+		BackgroundColor3 = COLORS.Primary,
+		BorderSizePixel = 0,
+		ZIndex = 5,
+		Parent = track,
+	})
 
-	local handle = Create("Frame")
-	handle.Name = "Handle"
-	handle.Size = UDim2.new(0, 16, 0, 16)
-	handle.Position = UDim2.new((value - min) / (max - min), -8, 0.5, -8)
-	handle.BackgroundColor3 = Color3.fromRGB(99, 102, 241)
-	handle.BorderSizePixel = 0
-	handle.Parent = track
-	handle.ZIndex = 5
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 8),
+		Parent = handle,
+	})
 
-	local handleCorner = Create("UICorner")
-	handleCorner.CornerRadius = UDim.new(0, 8)
-	handleCorner.Parent = handle
-
-	local valueLabel = Create("TextLabel")
-	valueLabel.Name = "Value"
-	valueLabel.Text = tostring(MathRound(value))
-	valueLabel.Size = UDim2.new(0, 50, 0, 20)
-	valueLabel.Position = UDim2.new(1, -55, 0, 25)
-	valueLabel.BackgroundTransparency = 1
-	valueLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-	valueLabel.TextSize = 12
-	valueLabel.Font = Enum.Font.Gotham
-	valueLabel.Parent = container
+	local valueLabel = CreateElement("TextLabel", {
+		Name = "Value",
+		Text = tostring(math.round(value)),
+		Size = UDim2.new(0, 50, 0, 20),
+		Position = UDim2.new(1, -55, 0, 30),
+		BackgroundTransparency = 1,
+		TextColor3 = COLORS.TextSecondary,
+		TextSize = 12,
+		Font = Enum.Font.Gotham,
+		Parent = container,
+	})
 
 	local dragging = false
+	local lastCallbackTime = 0
+	local callbackThrottle = config.Throttle or 0.05 -- FIXED: Throttle expensive callbacks
 
 	local function updateSlider(newValue, skipCallback)
-		value = MathClamp(MathRound(newValue), min, max)
+		value = math.clamp(math.round(newValue), min, max)
 		valueLabel.Text = tostring(value)
-		local percentage = (value - min) / (max - min)
-		progress.Size = UDim2.new(percentage, 0, 1, 0)
-		handle.Position = UDim2.new(percentage, -8, 0.5, -8)
+		local percent = (value - min) / (max - min)
+		progress.Size = UDim2.new(percent, 0, 1, 0)
+		handle.Position = UDim2.new(percent, -8, 0.5, -8)
 
-		if not skipCallback and config.callback then
-			local success, err = PCall(config.callback, value)
-			if not success then
-				warn("Slider callback error:", err)
+		if not skipCallback and config.Callback then
+			local now = tick()
+			if now - lastCallbackTime >= callbackThrottle then
+				lastCallbackTime = now
+				SafeCallback(config.Callback, value)
 			end
 		end
 	end
 
-	local handleBeganConn = handle.InputBegan:Connect(function(input)
+	tab._elementConnections:Add(handle.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
 		   input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
 		end
-	end)
-	RegisterConnection(handleBeganConn)
+	end))
 
-	local inputChangedConn = UserInputService.InputChanged:Connect(function(input)
+	tab._elementConnections:Add(UserInputService.InputChanged:Connect(function(input)
 		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or 
 						 input.UserInputType == Enum.UserInputType.Touch) then
-			local mouseX = input.Position.X
-			local trackStart = track.AbsolutePosition.X
+			local trackAbsPos = track.AbsolutePosition.X
 			local trackSize = track.AbsoluteSize.X
-			local percentage = MathClamp((mouseX - trackStart) / trackSize, 0, 1)
-			updateSlider(min + (max - min) * percentage)
+			local percent = math.clamp((input.Position.X - trackAbsPos) / trackSize, 0, 1)
+			updateSlider(min + (max - min) * percent)
 		end
-	end)
-	RegisterConnection(inputChangedConn)
+	end))
 
-	local inputEndedConn = UserInputService.InputEnded:Connect(function(input)
+	tab._elementConnections:Add(UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
 		   input.UserInputType == Enum.UserInputType.Touch then
 			dragging = false
+			-- Fire final callback when drag ends (in case throttling skipped last value)
+			SafeCallback(config.Callback, value)
 		end
-	end)
-	RegisterConnection(inputEndedConn)
-
-	self._elementCount = self._elementCount + 1
+	end))
 
 	return {
-		instance = container,
-		getValue = function() return value end,
-		setValue = function(newValue)
-			updateSlider(newValue, true)
-		end
+		GetValue = function() return value end,
+		SetValue = function(newVal)
+			updateSlider(newVal, true)
+		end,
+		Instance = container,
 	}
 end
 
-function Rayfield:AddInput(config, tab)
-	tab = tab or self.selectedTab
+function Window:AddTextbox(config, tab)
+	config = config or {}
+	tab = tab or self.CurrentTab
 	if not tab then return nil end
 
-	config = config or {}
+	local container = CreateElement("Frame", {
+		Name = config.Name or "Textbox",
+		Size = UDim2.new(1, -20, 0, 50),
+		BackgroundTransparency = 1,
+		Parent = tab.Content,
+	})
 
-	local container = Create("Frame")
-	container.Name = config.name or "Input"
-	container.Size = UDim2.new(1, -20, 0, 44)
-	container.BackgroundTransparency = 1
-	container.Parent = tab.content
+	CreateElement("TextLabel", {
+		Name = "Label",
+		Text = config.Name or "Textbox",
+		Size = UDim2.new(1, 0, 0, 20),
+		BackgroundTransparency = 1,
+		TextColor3 = COLORS.Text,
+		TextSize = 14,
+		Font = Enum.Font.GothamBold,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = container,
+	})
 
-	local label = Create("TextLabel")
-	label.Name = "Label"
-	label.Text = config.name or "Input"
-	label.Size = UDim2.new(1, 0, 0, 16)
-	label.BackgroundTransparency = 1
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextSize = 12
-	label.Font = Enum.Font.GothamBold
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = container
+	local textbox = CreateElement("TextBox", {
+		Name = "Input",
+		Text = config.Default or "",
+		PlaceholderText = config.PlaceHolder or "",
+		Size = UDim2.new(1, 0, 0, 28),
+		Position = UDim2.new(0, 0, 0, 20),
+		BackgroundColor3 = COLORS.Secondary,
+		TextColor3 = COLORS.Text,
+		PlaceholderColor3 = COLORS.TextDisabled,
+		TextSize = 14,
+		Font = Enum.Font.Gotham,
+		BorderSizePixel = 0,
+		ClearTextOnFocus = config.ClearOnFocus or false,
+		Parent = container,
+	})
 
-	local inputBox = Create("TextBox")
-	inputBox.Name = "Input"
-	inputBox.Text = config.default or ""
-	inputBox.PlaceholderText = config.placeholder or ""
-	inputBox.Size = UDim2.new(1, 0, 0, 24)
-	inputBox.Position = UDim2.new(0, 0, 0, 20)
-	inputBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-	inputBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-	inputBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 120)
-	inputBox.TextSize = 14
-	inputBox.Font = Enum.Font.Gotham
-	inputBox.BorderSizePixel = 0
-	inputBox.ClearTextOnFocus = config.clearOnFocus or false
-	inputBox.Parent = container
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 6),
+		Parent = textbox,
+	})
 
-	local inputCorner = Create("UICorner")
-	inputCorner.CornerRadius = UDim.new(0, 6)
-	inputCorner.Parent = inputBox
+	CreateElement("UIPadding", {
+		PaddingLeft = UDim.new(0, 10),
+		PaddingRight = UDim.new(0, 10),
+		Parent = textbox,
+	})
 
-	local inputPadding = Create("UIPadding")
-	inputPadding.PaddingLeft = UDim.new(0, 10)
-	inputPadding.PaddingRight = UDim.new(0, 10)
-	inputPadding.Parent = inputBox
-
-	-- FIX: Only connect once
-	local conn = inputBox.FocusLost:Connect(function(enterPressed)
-		if config.callback then
-			local success, err = PCall(config.callback, inputBox.Text, enterPressed)
-			if not success then
-				warn("Input callback error:", err)
-			end
-		end
-	end)
-	RegisterConnection(conn)
-
-	self._elementCount = self._elementCount + 1
+	tab._elementConnections:Add(textbox.FocusLost:Connect(function(enterPressed)
+		SafeCallback(config.Callback, textbox.Text, enterPressed)
+	end))
 
 	return {
-		instance = container,
-		getValue = function() return inputBox.Text end,
-		setValue = function(value) inputBox.Text = tostring(value) end
+		GetValue = function() return textbox.Text end,
+		SetValue = function(val) textbox.Text = tostring(val) end,
+		Instance = container,
 	}
 end
 
-function Rayfield:Show()
-	self.screenGui.Enabled = true
-	return self
-end
+function Window:AddDropdown(config, tab)
+	config = config or {}
+	tab = tab or self.CurrentTab
+	if not tab then return nil end
 
-function Rayfield:Hide()
-	self.screenGui.Enabled = false
-	return self
-end
+	local container = CreateElement("Frame", {
+		Name = config.Name or "Dropdown",
+		Size = UDim2.new(1, -20, 0, 50),
+		BackgroundTransparency = 1,
+		ClipsDescendants = true,
+		Parent = tab.Content,
+	})
 
-function Rayfield:Close()
-	-- Destroy all signals
-	for _, signal in pairs(self._signals) do
-		if signal.Destroy then
-			signal:Destroy()
+	CreateElement("TextLabel", {
+		Name = "Label",
+		Text = config.Name or "Dropdown",
+		Size = UDim2.new(1, 0, 0, 20),
+		BackgroundTransparency = 1,
+		TextColor3 = COLORS.Text,
+		TextSize = 14,
+		Font = Enum.Font.GothamBold,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = container,
+	})
+
+	local selectedValue = (config.Options and config.Options[1]) or "Select..."
+
+	local dropdownBtn = CreateElement("TextButton", {
+		Name = "DropdownBtn",
+		Text = selectedValue,
+		Size = UDim2.new(1, 0, 0, 28),
+		Position = UDim2.new(0, 0, 0, 20),
+		BackgroundColor3 = COLORS.Secondary,
+		TextColor3 = COLORS.Text,
+		TextSize = 14,
+		Font = Enum.Font.Gotham,
+		BorderSizePixel = 0,
+		Parent = container,
+	})
+
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 6),
+		Parent = dropdownBtn,
+	})
+
+	local isOpen = false
+
+	local dropdownList = CreateElement("Frame", {
+		Name = "DropdownList",
+		Size = UDim2.new(1, 0, 0, 0),
+		Position = UDim2.new(0, 0, 1, 5),
+		BackgroundColor3 = COLORS.Secondary,
+		BorderSizePixel = 0,
+		Visible = false,
+		ZIndex = 1000,
+		Parent = container,
+	})
+
+	CreateElement("UICorner", {
+		CornerRadius = UDim.new(0, 6),
+		Parent = dropdownList,
+	})
+
+	CreateElement("UIListLayout", {
+		Name = "ListLayout",
+		FillDirection = Enum.FillDirection.Vertical,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 4),
+		Parent = dropdownList,
+	})
+
+	CreateElement("UIPadding", {
+		PaddingTop = UDim.new(0, 4),
+		PaddingBottom = UDim.new(0, 4),
+		PaddingLeft = UDim.new(0, 4),
+		PaddingRight = UDim.new(0, 4),
+		Parent = dropdownList,
+	})
+
+	local function refreshOptions()
+		-- FIXED: Only destroy option buttons, preserve layout
+		for _, child in ipairs(dropdownList:GetChildren()) do
+			if child:IsA("TextButton") then
+				child:Destroy()
+			end
+		end
+
+		for _, option in ipairs(config.Options or {}) do
+			local optionBtn = CreateElement("TextButton", {
+				Name = option,
+				Text = option,
+				Size = UDim2.new(1, -8, 0, 26),
+				BackgroundColor3 = COLORS.Tertiary,
+				TextColor3 = COLORS.Text,
+				TextSize = 14,
+				Font = Enum.Font.Gotham,
+				BorderSizePixel = 0,
+				Parent = dropdownList,
+			})
+
+			CreateElement("UICorner", {
+				CornerRadius = UDim.new(0, 4),
+				Parent = optionBtn,
+			})
+
+			tab._elementConnections:Add(optionBtn.MouseButton1Click:Connect(function()
+				selectedValue = option
+				dropdownBtn.Text = option
+				isOpen = false
+				Tween(dropdownList, 0.2, {Size = UDim2.new(1, 0, 0, 0)})
+				dropdownList.Visible = false
+				SafeCallback(config.Callback, option)
+			end))
+
+			tab._elementConnections:Add(optionBtn.MouseEnter:Connect(function()
+				Tween(optionBtn, 0.2, {BackgroundColor3 = Color3.fromRGB(45, 45, 45)})
+			end))
+
+			tab._elementConnections:Add(optionBtn.MouseLeave:Connect(function()
+				Tween(optionBtn, 0.2, {BackgroundColor3 = COLORS.Tertiary})
+			end))
 		end
 	end
 
-	DisconnectAll()
+	tab._elementConnections:Add(dropdownBtn.MouseButton1Click:Connect(function()
+		isOpen = not isOpen
+		if isOpen then
+			refreshOptions()
+			local itemCount = #(config.Options or {})
+			local height = math.min((itemCount * 30) + 16, 200) -- Cap at 200px
+			dropdownList.Visible = true
+			Tween(dropdownList, 0.2, {Size = UDim2.new(1, 0, 0, height)})
+		else
+			Tween(dropdownList, 0.2, {Size = UDim2.new(1, 0, 0, 0)})
+			dropdownList.Visible = false
+		end
+	end))
 
-	if self.screenGui then
-		self.screenGui:Destroy()
+	return {
+		GetValue = function() return selectedValue end,
+		SetValue = function(val) 
+			selectedValue = val
+			dropdownBtn.Text = val
+		end,
+		Refresh = function(newOptions)
+			config.Options = newOptions
+			if isOpen then
+				refreshOptions()
+			end
+		end,
+		Instance = container,
+	}
+end
+
+function Window:AddLabel(text, tab)
+	tab = tab or self.CurrentTab
+	if not tab then return nil end
+
+	local label = CreateElement("TextLabel", {
+		Name = "Label",
+		Text = tostring(text),
+		Size = UDim2.new(1, -20, 0, 30),
+		BackgroundTransparency = 1,
+		TextColor3 = COLORS.TextSecondary,
+		TextSize = 14,
+		Font = Enum.Font.Gotham,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		WordWrap = true,
+		Parent = tab.Content,
+	})
+
+	return label
+end
+
+function Window:AddDivider(tab)
+	tab = tab or self.CurrentTab
+	if not tab then return nil end
+
+	local divider = CreateElement("Frame", {
+		Name = "Divider",
+		Size = UDim2.new(1, -20, 0, 1),
+		BackgroundColor3 = COLORS.Border,
+		BorderSizePixel = 0,
+		Parent = tab.Content,
+	})
+
+	return divider
+end
+
+function Window:Show()
+	self.ScreenGui.Enabled = true
+	return self
+end
+
+function Window:Hide()
+	self.ScreenGui.Enabled = false
+	return self
+end
+
+function Window:Close()
+	if self._isDestroyed then return end
+	self._isDestroyed = true
+
+	-- Disconnect all connections
+	self._connections:DisconnectAll()
+	for _, tab in ipairs(self.Tabs) do
+		if tab._elementConnections then
+			tab._elementConnections:DisconnectAll()
+		end
+	end
+
+	-- Destroy UI
+	if self.ScreenGui then
+		self.ScreenGui:Destroy()
 	end
 
 	-- Clear references
-	self.tabs = {}
-	self.selectedTab = nil
+	self.Tabs = {}
+	self.CurrentTab = nil
 	self._elements = {}
-	self._elementCount = 0
 end
 
-function Rayfield:GetMetrics()
-	local avgFrameTime = GetAverageFrameTime()
-	return {
-		averageFrameTime = avgFrameTime,
-		fps = avgFrameTime > 0 and MathRound(1 / avgFrameTime) or 0,
-		elementCount = self._elementCount,
-		connectionCount = PerformanceMetrics.connectionCount,
-		tweenCount = PerformanceMetrics.tweenCount,
-	}
+function Window:IsDestroyed()
+	return self._isDestroyed
 end
 
--- ============================================================================
--- MAIN EXPORT
--- ============================================================================
+-- Export
+function Rayfield.CreateWindow(config)
+	local window = Window.new(config)
+	table.insert(Rayfield.LoadedFrameworks, window)
+	return window
+end
 
-return {
-	new = function(config)
-		return Rayfield.new(config)
-	end,
-	Rayfield = Rayfield,
-	Signal = Signal,
-	PerformanceMetrics = PerformanceMetrics,
-}
+function Rayfield.GetLoadedWindows()
+	return Rayfield.LoadedFrameworks
+end
+
+function Rayfield.CloseAllWindows()
+	for _, window in ipairs(Rayfield.LoadedFrameworks) do
+		if not window:IsDestroyed() then
+			window:Close()
+		end
+	end
+	Rayfield.LoadedFrameworks = {}
+end
+
+return Rayfield
