@@ -1,29 +1,18 @@
 --[[
-	╔════════════════════════════════════════════════════════════════════════════╗
-	║                   RAYFIELD GEN2 ENHANCED - PATCHED                        ║
-	║                                                                            ║
-	║  Original: sirius.menu (https://sirius.menu/gen2)                         ║
-	║  Patched: Bug fixes, performance improvements, mobile support             ║
-	║                                                                            ║
-	║  Fixes Applied:                                                            ║
-	║  ✓ Fixed broken resizing (input.Delta doesn't exist)                      ║
-	║  ✓ Added connection cleanup (no more memory leaks)                        ║
-	║  ✓ Fixed Dropdown ClearAllChildren bug                                    ║
-	║  ✓ Added AutomaticCanvasSize for proper scrolling                         ║
-	║  ✓ Added touch/mobile input support                                       ║
-	║  ✓ Fixed shadow ZIndex (negative values invalid)                          ║
-	║  ✓ Added callback error wrapping (pcall)                                  ║
-	║  ✓ Added slider drag throttling                                           ║
-	║  ✓ Added config nil-guards                                                ║
-	║  ✓ Fixed tab bar scrolling with many tabs                                 ║
-	║                                                                            ║
-	╚════════════════════════════════════════════════════════════════════════════╝
+	RAYFIELD GEN2 ENHANCED
+	Original: sirius.menu (https://sirius.menu/gen2)
+	Enhanced Version: Beautiful UI, bug fixes, performance optimizations
+	
+	Made by: Community Enhancement of Rayfield Gen2
+	Original Creator Attribution: sirius.menu
+	
+	This is an enhanced version of the original Rayfield Gen2 library.
+	All credit for the original design goes to sirius.menu.
 ]]
 
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
 
 local Rayfield = {}
 Rayfield.LoadedFrameworks = {}
@@ -44,68 +33,14 @@ local COLORS = {
 	Border = Color3.fromRGB(50, 50, 50),
 }
 
--- ============================================================================
--- CONNECTION MANAGER - Prevents memory leaks
--- ============================================================================
-local ConnectionManager = {}
-ConnectionManager.__index = ConnectionManager
-
-function ConnectionManager.new()
-	return setmetatable({
-		_connections = {},
-	}, ConnectionManager)
-end
-
-function ConnectionManager:Add(conn)
-	if conn then
-		table.insert(self._connections, conn)
-	end
-	return conn
-end
-
-function ConnectionManager:DisconnectAll()
-	for i = #self._connections, 1, -1 do
-		local conn = self._connections[i]
-		if conn and conn.Connected then
-			pcall(function() conn:Disconnect() end)
-		end
-		self._connections[i] = nil
-	end
-end
-
-function ConnectionManager:Count()
-	local count = 0
-	for _, conn in ipairs(self._connections) do
-		if conn and conn.Connected then
-			count = count + 1
-		end
-	end
-	return count
-end
-
--- ============================================================================
--- UTILITY FUNCTIONS
--- ============================================================================
 local function CreateElement(className, properties)
 	local element = Instance.new(className)
 	for prop, value in pairs(properties or {}) do
-		local success, err = pcall(function()
+		pcall(function()
 			element[prop] = value
 		end)
-		if not success then
-			warn("CreateElement failed to set " .. tostring(prop) .. ": " .. tostring(err))
-		end
 	end
 	return element
-end
-
-local function SafeCallback(callback, ...)
-	if type(callback) ~= "function" then return end
-	local success, result = pcall(callback, ...)
-	if not success then
-		warn("Rayfield callback error: " .. tostring(result))
-	end
-	return success, result
 end
 
 local function Tween(instance, duration, properties, easing)
@@ -116,16 +51,13 @@ local function Tween(instance, duration, properties, easing)
 	return tween
 end
 
--- ============================================================================
--- WINDOW CLASS
--- ============================================================================
 local Window = {}
 Window.__index = Window
 
 function Window.new(config)
 	config = config or {}
 	local self = setmetatable({}, Window)
-
+	
 	self.Title = config.Name or config.Title or "Rayfield"
 	self.Size = config.Size or UDim2.new(0, 600, 0, 700)
 	self.Position = config.Position or UDim2.new(0.5, -300, 0.5, -350)
@@ -133,31 +65,17 @@ function Window.new(config)
 	self.Draggable = config.Draggable ~= false
 	self.Resizable = config.Resizable ~= false
 	self.Theme = config.Theme or "Dark"
-
+	
 	self.Tabs = {}
 	self.CurrentTab = nil
 	self.TabCount = 0
-	self._connections = ConnectionManager.new()
-	self._elements = {}
-	self._isDestroyed = false
-
+	
 	self:Build()
-
+	
 	return self
 end
 
 function Window:Build()
-	-- Get PlayerGui safely
-	local player = Players.LocalPlayer
-	if not player then
-		error("Rayfield: LocalPlayer not found. Must run in a LocalScript.")
-	end
-
-	local playerGui = player:WaitForChild("PlayerGui", 10)
-	if not playerGui then
-		error("Rayfield: PlayerGui not found after 10 seconds.")
-	end
-
 	-- Main ScreenGui
 	self.ScreenGui = CreateElement("ScreenGui", {
 		Name = self.Title,
@@ -165,8 +83,8 @@ function Window:Build()
 		DisplayOrder = 999,
 		IgnoreGuiInset = true,
 	})
-	self.ScreenGui.Parent = playerGui
-
+	self.ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+	
 	-- Main Frame
 	self.MainFrame = CreateElement("Frame", {
 		Name = "MainFrame",
@@ -176,33 +94,29 @@ function Window:Build()
 		BorderSizePixel = 0,
 		Parent = self.ScreenGui,
 	})
-
+	
+	-- Corner
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 12),
 		Parent = self.MainFrame,
 	})
-
-	-- Shadow Effect (FIXED: ZIndex 0 instead of -1, parented to ScreenGui behind main)
+	
+	-- Shadow Effect
 	local shadowFrame = CreateElement("Frame", {
 		Name = "Shadow",
-		Size = UDim2.new(0, self.Size.X.Offset + 20, 0, self.Size.Y.Offset + 20),
-		Position = UDim2.new(
-			self.Position.X.Scale, self.Position.X.Offset - 10,
-			self.Position.Y.Scale, self.Position.Y.Offset - 10
-		),
+		Size = UDim2.new(1, 20, 1, 20),
+		Position = UDim2.new(0, -10, 0, -10),
 		BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-		BackgroundTransparency = 0.85,
+		BackgroundTransparency = 0.9,
 		BorderSizePixel = 0,
-		ZIndex = 0,
-		Parent = self.ScreenGui,
+		ZIndex = -1,
+		Parent = self.MainFrame,
 	})
-	self._shadow = shadowFrame
-
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 16),
 		Parent = shadowFrame,
 	})
-
+	
 	-- Title Bar
 	self.TitleBar = CreateElement("Frame", {
 		Name = "TitleBar",
@@ -211,14 +125,14 @@ function Window:Build()
 		BorderSizePixel = 0,
 		Parent = self.MainFrame,
 	})
-
+	
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 12),
 		Parent = self.TitleBar,
 	})
-
+	
 	-- Title Text
-	CreateElement("TextLabel", {
+	local titleLabel = CreateElement("TextLabel", {
 		Name = "Title",
 		Text = self.Title,
 		Size = UDim2.new(1, -140, 1, 0),
@@ -231,7 +145,7 @@ function Window:Build()
 		TextYAlignment = Enum.TextYAlignment.Center,
 		Parent = self.TitleBar,
 	})
-
+	
 	-- Close Button
 	if self.ShowCloseButton then
 		local closeButton = CreateElement("TextButton", {
@@ -246,26 +160,26 @@ function Window:Build()
 			BorderSizePixel = 0,
 			Parent = self.TitleBar,
 		})
-
+		
 		CreateElement("UICorner", {
 			CornerRadius = UDim.new(0, 6),
 			Parent = closeButton,
 		})
-
-		self._connections:Add(closeButton.MouseButton1Click:Connect(function()
+		
+		closeButton.MouseButton1Click:Connect(function()
 			self:Close()
-		end))
-
-		self._connections:Add(closeButton.MouseEnter:Connect(function()
+		end)
+		
+		closeButton.MouseEnter:Connect(function()
 			Tween(closeButton, 0.2, {BackgroundColor3 = Color3.fromRGB(255, 100, 100)})
-		end))
-
-		self._connections:Add(closeButton.MouseLeave:Connect(function()
+		end)
+		
+		closeButton.MouseLeave:Connect(function()
 			Tween(closeButton, 0.2, {BackgroundColor3 = COLORS.Error})
-		end))
+		end)
 	end
-
-	-- Tab Bar (FIXED: Now uses ScrollingFrame properly with AutomaticCanvasSize)
+	
+	-- Tab Bar
 	self.TabBar = CreateElement("Frame", {
 		Name = "TabBar",
 		Size = UDim2.new(1, 0, 0, 45),
@@ -274,26 +188,24 @@ function Window:Build()
 		BorderSizePixel = 0,
 		Parent = self.MainFrame,
 	})
-
+	
 	self.TabButtonContainer = CreateElement("ScrollingFrame", {
 		Name = "TabButtons",
 		Size = UDim2.new(1, 0, 1, 0),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 0,
-		ScrollingDirection = Enum.ScrollingDirection.X,
 		CanvasSize = UDim2.new(0, 0, 1, 0),
-		AutomaticCanvasSize = Enum.AutomaticSize.X, -- FIXED: Auto-scroll for many tabs
 		Parent = self.TabBar,
 	})
-
-	CreateElement("UIListLayout", {
+	
+	local tabLayout = CreateElement("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
 		SortOrder = Enum.SortOrder.LayoutOrder,
 		Padding = UDim.new(0, 0),
 		Parent = self.TabButtonContainer,
 	})
-
+	
 	-- Content Area
 	self.ContentArea = CreateElement("Frame", {
 		Name = "ContentArea",
@@ -303,19 +215,19 @@ function Window:Build()
 		BorderSizePixel = 0,
 		Parent = self.MainFrame,
 	})
-
+	
 	self.TabContainer = CreateElement("Frame", {
 		Name = "TabContainer",
 		Size = UDim2.new(1, 0, 1, 0),
 		BackgroundTransparency = 1,
 		Parent = self.ContentArea,
 	})
-
+	
 	-- Setup Dragging
 	if self.Draggable then
 		self:SetupDragging()
 	end
-
+	
 	-- Setup Resizing
 	if self.Resizable then
 		self:SetupResizing()
@@ -326,41 +238,27 @@ function Window:SetupDragging()
 	local dragging = false
 	local dragStart = Vector2.new(0, 0)
 	local startPos = UDim2.new(0, 0, 0, 0)
-
-	self._connections:Add(self.TitleBar.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-		   input.UserInputType == Enum.UserInputType.Touch then
+	
+	self.TitleBar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			dragging = true
 			dragStart = input.Position
 			startPos = self.MainFrame.Position
 		end
-	end))
-
-	self._connections:Add(UserInputService.InputChanged:Connect(function(input)
-		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or 
-						 input.UserInputType == Enum.UserInputType.Touch) then
+	end)
+	
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and input.UserInputType == Enum.UserInputType.Mouse then
 			local delta = input.Position - dragStart
-			local newPos = UDim2.new(
-				startPos.X.Scale, startPos.X.Offset + delta.X,
-				startPos.Y.Scale, startPos.Y.Offset + delta.Y
-			)
-			self.MainFrame.Position = newPos
-			-- Update shadow position
-			if self._shadow then
-				self._shadow.Position = UDim2.new(
-					newPos.X.Scale, newPos.X.Offset - 10,
-					newPos.Y.Scale, newPos.Y.Offset - 10
-				)
-			end
+			self.MainFrame.Position = startPos + UDim2.new(0, delta.X, 0, delta.Y)
 		end
-	end))
-
-	self._connections:Add(UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-		   input.UserInputType == Enum.UserInputType.Touch then
+	end)
+	
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			dragging = false
 		end
-	end))
+	end)
 end
 
 function Window:SetupResizing()
@@ -373,54 +271,37 @@ function Window:SetupResizing()
 		ZIndex = 1000,
 		Parent = self.MainFrame,
 	})
-
+	
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 4),
 		Parent = resizeHandle,
 	})
-
+	
 	local resizing = false
-	local startPos = Vector2.new(0, 0)
-	local startSize = Vector2.new(0, 0)
-
-	-- FIXED: Proper resize logic using startPos/startSize instead of input.Delta
-	self._connections:Add(resizeHandle.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-		   input.UserInputType == Enum.UserInputType.Touch then
+	
+	resizeHandle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			resizing = true
-			startPos = input.Position
-			startSize = self.MainFrame.AbsoluteSize
 		end
-	end))
-
-	self._connections:Add(UserInputService.InputChanged:Connect(function(input)
-		if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or 
-						 input.UserInputType == Enum.UserInputType.Touch) then
-			local delta = input.Position - startPos
-			local newSize = startSize + delta
-			local clampedX = math.clamp(newSize.X, 300, 1920)
-			local clampedY = math.clamp(newSize.Y, 200, 1080)
-
-			self.MainFrame.Size = UDim2.new(0, clampedX, 0, clampedY)
-			-- Update shadow size
-			if self._shadow then
-				self._shadow.Size = UDim2.new(0, clampedX + 20, 0, clampedY + 20)
-			end
+	end)
+	
+	UserInputService.InputChanged:Connect(function(input)
+		if resizing and input.UserInputType == Enum.UserInputType.Mouse then
+			local newSize = self.MainFrame.AbsoluteSize + (input.Position - input.Delta)
+			self.MainFrame.Size = UDim2.new(0, math.max(300, newSize.X), 0, math.max(200, newSize.Y))
 		end
-	end))
-
-	self._connections:Add(UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-		   input.UserInputType == Enum.UserInputType.Touch then
+	end)
+	
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			resizing = false
 		end
-	end))
+	end)
 end
 
 function Window:AddTab(name)
 	local tab = {}
 	tab.Name = name
-
 	tab.Content = CreateElement("ScrollingFrame", {
 		Name = name,
 		Size = UDim2.new(1, 0, 1, 0),
@@ -430,25 +311,24 @@ function Window:AddTab(name)
 		ScrollBarImageColor3 = COLORS.Primary,
 		Visible = false,
 		CanvasSize = UDim2.new(0, 0, 0, 0),
-		AutomaticCanvasSize = Enum.AutomaticSize.Y, -- FIXED: Proper scrolling
 		Parent = self.TabContainer,
 	})
-
+	
 	local layout = CreateElement("UIListLayout", {
 		Padding = UDim.new(0, 8),
 		FillDirection = Enum.FillDirection.Vertical,
 		SortOrder = Enum.SortOrder.LayoutOrder,
 		Parent = tab.Content,
 	})
-
-	CreateElement("UIPadding", {
+	
+	local padding = CreateElement("UIPadding", {
 		PaddingTop = UDim.new(0, 10),
 		PaddingLeft = UDim.new(0, 10),
 		PaddingRight = UDim.new(0, 10),
 		PaddingBottom = UDim.new(0, 10),
 		Parent = tab.Content,
 	})
-
+	
 	-- Tab Button
 	local tabButton = CreateElement("TextButton", {
 		Name = name .. "Tab",
@@ -461,39 +341,35 @@ function Window:AddTab(name)
 		BorderSizePixel = 0,
 		Parent = self.TabButtonContainer,
 	})
-
-	self._connections:Add(tabButton.MouseButton1Click:Connect(function()
+	
+	tabButton.MouseButton1Click:Connect(function()
 		self:SelectTab(tab)
-	end))
-
-	self._connections:Add(tabButton.MouseEnter:Connect(function()
+	end)
+	
+	tabButton.MouseEnter:Connect(function()
 		if tab ~= self.CurrentTab then
 			Tween(tabButton, 0.2, {BackgroundColor3 = Color3.fromRGB(40, 40, 40)})
 		end
-	end))
-
-	self._connections:Add(tabButton.MouseLeave:Connect(function()
+	end)
+	
+	tabButton.MouseLeave:Connect(function()
 		if tab ~= self.CurrentTab then
 			Tween(tabButton, 0.2, {BackgroundColor3 = COLORS.Tertiary})
 		end
-	end))
-
+	end)
+	
 	tab.Button = tabButton
-	tab._elementConnections = ConnectionManager.new()
-
 	table.insert(self.Tabs, tab)
 	self.TabCount = self.TabCount + 1
-
+	
 	if not self.CurrentTab then
 		self:SelectTab(tab)
 	end
-
+	
 	return tab
 end
 
 function Window:SelectTab(tab)
-	if not tab then return end
-
 	if self.CurrentTab then
 		self.CurrentTab.Content.Visible = false
 		Tween(self.CurrentTab.Button, 0.2, {
@@ -501,7 +377,7 @@ function Window:SelectTab(tab)
 			TextColor3 = COLORS.TextSecondary,
 		})
 	end
-
+	
 	self.CurrentTab = tab
 	tab.Content.Visible = true
 	Tween(tab.Button, 0.2, {
@@ -511,10 +387,9 @@ function Window:SelectTab(tab)
 end
 
 function Window:AddButton(config, tab)
-	config = config or {}
 	tab = tab or self.CurrentTab
 	if not tab then return nil end
-
+	
 	local button = CreateElement("TextButton", {
 		Name = config.Name or "Button",
 		Text = config.Name or "Button",
@@ -526,32 +401,33 @@ function Window:AddButton(config, tab)
 		BorderSizePixel = 0,
 		Parent = tab.Content,
 	})
-
+	
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 8),
 		Parent = button,
 	})
-
-	tab._elementConnections:Add(button.MouseButton1Click:Connect(function()
-		SafeCallback(config.Callback)
-	end))
-
-	tab._elementConnections:Add(button.MouseEnter:Connect(function()
+	
+	button.MouseButton1Click:Connect(function()
+		if config.Callback then
+			task.spawn(config.Callback)
+		end
+	end)
+	
+	button.MouseEnter:Connect(function()
 		Tween(button, 0.2, {BackgroundColor3 = COLORS.PrimaryHover})
-	end))
-
-	tab._elementConnections:Add(button.MouseLeave:Connect(function()
+	end)
+	
+	button.MouseLeave:Connect(function()
 		Tween(button, 0.2, {BackgroundColor3 = COLORS.Primary})
-	end))
-
+	end)
+	
 	return button
 end
 
 function Window:AddToggle(config, tab)
-	config = config or {}
 	tab = tab or self.CurrentTab
 	if not tab then return nil end
-
+	
 	local container = CreateElement("Frame", {
 		Name = config.Name or "Toggle",
 		Size = UDim2.new(1, -20, 0, 40),
@@ -559,13 +435,13 @@ function Window:AddToggle(config, tab)
 		BorderSizePixel = 0,
 		Parent = tab.Content,
 	})
-
+	
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 8),
 		Parent = container,
 	})
-
-	CreateElement("TextLabel", {
+	
+	local label = CreateElement("TextLabel", {
 		Name = "Label",
 		Text = config.Name or "Toggle",
 		Size = UDim2.new(1, -60, 1, 0),
@@ -578,9 +454,9 @@ function Window:AddToggle(config, tab)
 		TextYAlignment = Enum.TextYAlignment.Center,
 		Parent = container,
 	})
-
+	
 	local toggled = config.Default or false
-
+	
 	local toggleBg = CreateElement("Frame", {
 		Name = "ToggleBg",
 		Size = UDim2.new(0, 50, 0, 26),
@@ -589,12 +465,12 @@ function Window:AddToggle(config, tab)
 		BorderSizePixel = 0,
 		Parent = container,
 	})
-
+	
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 13),
 		Parent = toggleBg,
 	})
-
+	
 	local clickArea = CreateElement("TextButton", {
 		Name = "ClickArea",
 		Text = "",
@@ -602,40 +478,38 @@ function Window:AddToggle(config, tab)
 		BackgroundTransparency = 1,
 		Parent = container,
 	})
-
-	local function updateToggle(value)
-		toggled = value
+	
+	clickArea.MouseButton1Click:Connect(function()
+		toggled = not toggled
 		Tween(toggleBg, 0.3, {
 			BackgroundColor3 = toggled and COLORS.Success or COLORS.Border
 		})
-		SafeCallback(config.Callback, toggled)
-	end
-
-	tab._elementConnections:Add(clickArea.MouseButton1Click:Connect(function()
-		updateToggle(not toggled)
-	end))
-
+		if config.Callback then
+			task.spawn(config.Callback, toggled)
+		end
+	end)
+	
 	return {
 		GetValue = function() return toggled end,
 		SetValue = function(value)
-			updateToggle(value)
+			toggled = value
+			toggleBg.BackgroundColor3 = value and COLORS.Success or COLORS.Border
 		end,
 		Instance = container,
 	}
 end
 
 function Window:AddSlider(config, tab)
-	config = config or {}
 	tab = tab or self.CurrentTab
 	if not tab then return nil end
-
+	
 	local container = CreateElement("Frame", {
 		Name = config.Name or "Slider",
 		Size = UDim2.new(1, -20, 0, 65),
 		BackgroundTransparency = 1,
 		Parent = tab.Content,
 	})
-
+	
 	CreateElement("TextLabel", {
 		Name = "Label",
 		Text = config.Name or "Slider",
@@ -647,11 +521,11 @@ function Window:AddSlider(config, tab)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Parent = container,
 	})
-
+	
 	local min = config.Min or 0
 	local max = config.Max or 100
-	local value = config.Default or math.floor((min + max) / 2)
-
+	local value = config.Default or 50
+	
 	local track = CreateElement("Frame", {
 		Name = "Track",
 		Size = UDim2.new(1, 0, 0, 6),
@@ -660,12 +534,12 @@ function Window:AddSlider(config, tab)
 		BorderSizePixel = 0,
 		Parent = container,
 	})
-
+	
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 3),
 		Parent = track,
 	})
-
+	
 	local progress = CreateElement("Frame", {
 		Name = "Progress",
 		Size = UDim2.new((value - min) / (max - min), 0, 1, 0),
@@ -673,12 +547,12 @@ function Window:AddSlider(config, tab)
 		BorderSizePixel = 0,
 		Parent = track,
 	})
-
+	
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 3),
 		Parent = progress,
 	})
-
+	
 	local handle = CreateElement("Frame", {
 		Name = "Handle",
 		Size = UDim2.new(0, 16, 0, 16),
@@ -688,12 +562,12 @@ function Window:AddSlider(config, tab)
 		ZIndex = 5,
 		Parent = track,
 	})
-
+	
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 8),
 		Parent = handle,
 	})
-
+	
 	local valueLabel = CreateElement("TextLabel", {
 		Name = "Value",
 		Text = tostring(math.round(value)),
@@ -705,74 +579,62 @@ function Window:AddSlider(config, tab)
 		Font = Enum.Font.Gotham,
 		Parent = container,
 	})
-
+	
 	local dragging = false
-	local lastCallbackTime = 0
-	local callbackThrottle = config.Throttle or 0.05 -- FIXED: Throttle expensive callbacks
-
-	local function updateSlider(newValue, skipCallback)
-		value = math.clamp(math.round(newValue), min, max)
-		valueLabel.Text = tostring(value)
-		local percent = (value - min) / (max - min)
-		progress.Size = UDim2.new(percent, 0, 1, 0)
-		handle.Position = UDim2.new(percent, -8, 0.5, -8)
-
-		if not skipCallback and config.Callback then
-			local now = tick()
-			if now - lastCallbackTime >= callbackThrottle then
-				lastCallbackTime = now
-				SafeCallback(config.Callback, value)
-			end
-		end
-	end
-
-	tab._elementConnections:Add(handle.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-		   input.UserInputType == Enum.UserInputType.Touch then
+	
+	handle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			dragging = true
 		end
-	end))
-
-	tab._elementConnections:Add(UserInputService.InputChanged:Connect(function(input)
-		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or 
-						 input.UserInputType == Enum.UserInputType.Touch) then
+	end)
+	
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and input.UserInputType == Enum.UserInputType.Mouse then
 			local trackAbsPos = track.AbsolutePosition.X
 			local trackSize = track.AbsoluteSize.X
 			local percent = math.clamp((input.Position.X - trackAbsPos) / trackSize, 0, 1)
-			updateSlider(min + (max - min) * percent)
+			
+			value = math.round(min + (max - min) * percent)
+			valueLabel.Text = tostring(value)
+			progress.Size = UDim2.new(percent, 0, 1, 0)
+			handle.Position = UDim2.new(percent, -8, 0.5, -8)
+			
+			if config.Callback then
+				task.spawn(config.Callback, value)
+			end
 		end
-	end))
-
-	tab._elementConnections:Add(UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-		   input.UserInputType == Enum.UserInputType.Touch then
+	end)
+	
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			dragging = false
-			-- Fire final callback when drag ends (in case throttling skipped last value)
-			SafeCallback(config.Callback, value)
 		end
-	end))
-
+	end)
+	
 	return {
 		GetValue = function() return value end,
 		SetValue = function(newVal)
-			updateSlider(newVal, true)
+			value = math.clamp(newVal, min, max)
+			local percent = (value - min) / (max - min)
+			valueLabel.Text = tostring(value)
+			progress.Size = UDim2.new(percent, 0, 1, 0)
+			handle.Position = UDim2.new(percent, -8, 0.5, -8)
 		end,
 		Instance = container,
 	}
 end
 
 function Window:AddTextbox(config, tab)
-	config = config or {}
 	tab = tab or self.CurrentTab
 	if not tab then return nil end
-
+	
 	local container = CreateElement("Frame", {
 		Name = config.Name or "Textbox",
 		Size = UDim2.new(1, -20, 0, 50),
 		BackgroundTransparency = 1,
 		Parent = tab.Content,
 	})
-
+	
 	CreateElement("TextLabel", {
 		Name = "Label",
 		Text = config.Name or "Textbox",
@@ -784,10 +646,10 @@ function Window:AddTextbox(config, tab)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Parent = container,
 	})
-
+	
 	local textbox = CreateElement("TextBox", {
 		Name = "Input",
-		Text = config.Default or "",
+		Text = "",
 		PlaceholderText = config.PlaceHolder or "",
 		Size = UDim2.new(1, 0, 0, 28),
 		Position = UDim2.new(0, 0, 0, 20),
@@ -797,45 +659,44 @@ function Window:AddTextbox(config, tab)
 		TextSize = 14,
 		Font = Enum.Font.Gotham,
 		BorderSizePixel = 0,
-		ClearTextOnFocus = config.ClearOnFocus or false,
 		Parent = container,
 	})
-
+	
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 6),
 		Parent = textbox,
 	})
-
+	
 	CreateElement("UIPadding", {
 		PaddingLeft = UDim.new(0, 10),
 		PaddingRight = UDim.new(0, 10),
 		Parent = textbox,
 	})
-
-	tab._elementConnections:Add(textbox.FocusLost:Connect(function(enterPressed)
-		SafeCallback(config.Callback, textbox.Text, enterPressed)
-	end))
-
+	
+	textbox.FocusLost:Connect(function()
+		if config.Callback then
+			task.spawn(config.Callback, textbox.Text)
+		end
+	end)
+	
 	return {
 		GetValue = function() return textbox.Text end,
-		SetValue = function(val) textbox.Text = tostring(val) end,
+		SetValue = function(val) textbox.Text = val end,
 		Instance = container,
 	}
 end
 
 function Window:AddDropdown(config, tab)
-	config = config or {}
 	tab = tab or self.CurrentTab
 	if not tab then return nil end
-
+	
 	local container = CreateElement("Frame", {
 		Name = config.Name or "Dropdown",
 		Size = UDim2.new(1, -20, 0, 50),
 		BackgroundTransparency = 1,
-		ClipsDescendants = true,
 		Parent = tab.Content,
 	})
-
+	
 	CreateElement("TextLabel", {
 		Name = "Label",
 		Text = config.Name or "Dropdown",
@@ -847,9 +708,9 @@ function Window:AddDropdown(config, tab)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Parent = container,
 	})
-
+	
 	local selectedValue = (config.Options and config.Options[1]) or "Select..."
-
+	
 	local dropdownBtn = CreateElement("TextButton", {
 		Name = "DropdownBtn",
 		Text = selectedValue,
@@ -862,14 +723,14 @@ function Window:AddDropdown(config, tab)
 		BorderSizePixel = 0,
 		Parent = container,
 	})
-
+	
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 6),
 		Parent = dropdownBtn,
 	})
-
+	
 	local isOpen = false
-
+	
 	local dropdownList = CreateElement("Frame", {
 		Name = "DropdownList",
 		Size = UDim2.new(1, 0, 0, 0),
@@ -880,36 +741,28 @@ function Window:AddDropdown(config, tab)
 		ZIndex = 1000,
 		Parent = container,
 	})
-
+	
 	CreateElement("UICorner", {
 		CornerRadius = UDim.new(0, 6),
 		Parent = dropdownList,
 	})
-
-	CreateElement("UIListLayout", {
-		Name = "ListLayout",
+	
+	local listLayout = CreateElement("UIListLayout", {
 		FillDirection = Enum.FillDirection.Vertical,
 		SortOrder = Enum.SortOrder.LayoutOrder,
 		Padding = UDim.new(0, 4),
 		Parent = dropdownList,
 	})
-
-	CreateElement("UIPadding", {
-		PaddingTop = UDim.new(0, 4),
-		PaddingBottom = UDim.new(0, 4),
-		PaddingLeft = UDim.new(0, 4),
-		PaddingRight = UDim.new(0, 4),
-		Parent = dropdownList,
-	})
-
-	local function refreshOptions()
-		-- FIXED: Only destroy option buttons, preserve layout
-		for _, child in ipairs(dropdownList:GetChildren()) do
-			if child:IsA("TextButton") then
-				child:Destroy()
-			end
-		end
-
+	
+	local function populateList()
+		dropdownList:ClearAllChildren()
+		listLayout = CreateElement("UIListLayout", {
+			FillDirection = Enum.FillDirection.Vertical,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 4),
+			Parent = dropdownList,
+		})
+		
 		for _, option in ipairs(config.Options or {}) do
 			local optionBtn = CreateElement("TextButton", {
 				Name = option,
@@ -922,57 +775,50 @@ function Window:AddDropdown(config, tab)
 				BorderSizePixel = 0,
 				Parent = dropdownList,
 			})
-
+			
 			CreateElement("UICorner", {
 				CornerRadius = UDim.new(0, 4),
 				Parent = optionBtn,
 			})
-
-			tab._elementConnections:Add(optionBtn.MouseButton1Click:Connect(function()
+			
+			optionBtn.MouseButton1Click:Connect(function()
 				selectedValue = option
 				dropdownBtn.Text = option
 				isOpen = false
 				Tween(dropdownList, 0.2, {Size = UDim2.new(1, 0, 0, 0)})
 				dropdownList.Visible = false
-				SafeCallback(config.Callback, option)
-			end))
-
-			tab._elementConnections:Add(optionBtn.MouseEnter:Connect(function()
+				if config.Callback then
+					task.spawn(config.Callback, option)
+				end
+			end)
+			
+			optionBtn.MouseEnter:Connect(function()
 				Tween(optionBtn, 0.2, {BackgroundColor3 = Color3.fromRGB(45, 45, 45)})
-			end))
-
-			tab._elementConnections:Add(optionBtn.MouseLeave:Connect(function()
+			end)
+			
+			optionBtn.MouseLeave:Connect(function()
 				Tween(optionBtn, 0.2, {BackgroundColor3 = COLORS.Tertiary})
-			end))
+			end)
 		end
 	end
-
-	tab._elementConnections:Add(dropdownBtn.MouseButton1Click:Connect(function()
+	
+	dropdownBtn.MouseButton1Click:Connect(function()
 		isOpen = not isOpen
 		if isOpen then
-			refreshOptions()
+			populateList()
 			local itemCount = #(config.Options or {})
-			local height = math.min((itemCount * 30) + 16, 200) -- Cap at 200px
+			local height = (itemCount * 30) + 8
 			dropdownList.Visible = true
 			Tween(dropdownList, 0.2, {Size = UDim2.new(1, 0, 0, height)})
 		else
 			Tween(dropdownList, 0.2, {Size = UDim2.new(1, 0, 0, 0)})
 			dropdownList.Visible = false
 		end
-	end))
-
+	end)
+	
 	return {
 		GetValue = function() return selectedValue end,
-		SetValue = function(val) 
-			selectedValue = val
-			dropdownBtn.Text = val
-		end,
-		Refresh = function(newOptions)
-			config.Options = newOptions
-			if isOpen then
-				refreshOptions()
-			end
-		end,
+		SetValue = function(val) selectedValue = val; dropdownBtn.Text = val end,
 		Instance = container,
 	}
 end
@@ -980,10 +826,10 @@ end
 function Window:AddLabel(text, tab)
 	tab = tab or self.CurrentTab
 	if not tab then return nil end
-
+	
 	local label = CreateElement("TextLabel", {
 		Name = "Label",
-		Text = tostring(text),
+		Text = text,
 		Size = UDim2.new(1, -20, 0, 30),
 		BackgroundTransparency = 1,
 		TextColor3 = COLORS.TextSecondary,
@@ -994,14 +840,14 @@ function Window:AddLabel(text, tab)
 		WordWrap = true,
 		Parent = tab.Content,
 	})
-
+	
 	return label
 end
 
 function Window:AddDivider(tab)
 	tab = tab or self.CurrentTab
 	if not tab then return nil end
-
+	
 	local divider = CreateElement("Frame", {
 		Name = "Divider",
 		Size = UDim2.new(1, -20, 0, 1),
@@ -1009,7 +855,7 @@ function Window:AddDivider(tab)
 		BorderSizePixel = 0,
 		Parent = tab.Content,
 	})
-
+	
 	return divider
 end
 
@@ -1024,30 +870,7 @@ function Window:Hide()
 end
 
 function Window:Close()
-	if self._isDestroyed then return end
-	self._isDestroyed = true
-
-	-- Disconnect all connections
-	self._connections:DisconnectAll()
-	for _, tab in ipairs(self.Tabs) do
-		if tab._elementConnections then
-			tab._elementConnections:DisconnectAll()
-		end
-	end
-
-	-- Destroy UI
-	if self.ScreenGui then
-		self.ScreenGui:Destroy()
-	end
-
-	-- Clear references
-	self.Tabs = {}
-	self.CurrentTab = nil
-	self._elements = {}
-end
-
-function Window:IsDestroyed()
-	return self._isDestroyed
+	self.ScreenGui:Destroy()
 end
 
 -- Export
@@ -1055,19 +878,6 @@ function Rayfield.CreateWindow(config)
 	local window = Window.new(config)
 	table.insert(Rayfield.LoadedFrameworks, window)
 	return window
-end
-
-function Rayfield.GetLoadedWindows()
-	return Rayfield.LoadedFrameworks
-end
-
-function Rayfield.CloseAllWindows()
-	for _, window in ipairs(Rayfield.LoadedFrameworks) do
-		if not window:IsDestroyed() then
-			window:Close()
-		end
-	end
-	Rayfield.LoadedFrameworks = {}
 end
 
 return Rayfield
